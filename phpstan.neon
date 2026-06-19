@@ -4,7 +4,7 @@ rules:
   - Symplify\PHPStanRules\Rules\AnnotateRegexClassConstWithRegexLinkRule
   - Symplify\PHPStanRules\Rules\RegexSuffixInRegexConstantRule
 parameters:
-  phpVersion: 80100
+  phpVersion: 80200
   level: max
   strictRules:
     allRules: false

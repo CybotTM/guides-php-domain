@@ -5,6 +5,7 @@
     "type": "library",
     "homepage": "https://docs.typo3.org",
     "require": {
+        "php": "^8.2",
         "phpdocumentor/guides": "^1.0",
         "phpdocumentor/guides-restructured-text": "^1.0"
     },
