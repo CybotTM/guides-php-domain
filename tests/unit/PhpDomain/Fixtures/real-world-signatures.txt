@@ -1,0 +1,211 @@
+__construct(ExtensionConfiguration $extensionConfiguration, LogManager $logManager)
+analyzeDocument(string $pdf, string $prompt, ?ChatOptions $options = null): DocumentAnalysisResult
+analyzeImage(array $content, array $options = []): VisionResponse
+analyzeImage(string|array $imageUrl, string $customPrompt, ?VisionOptions $options = null): string|array
+analyzeImageFull(string $imageUrl, string $prompt, ?VisionOptions $options = null): VisionResponse
+arc(PointInterface $center, BoxInterface $size, $start, $end, Color $color)
+assertDeletable(string $identifier): void
+calculateChecksum(string $plaintext): string
+chat(array $messages, ?ChatOptions $options = null): CompletionResponse
+chatCompletion(array $messages, array $options = []): CompletionResponse
+chatCompletionWithTools(array $messages, array $tools, array $options = []): CompletionResponse
+chatWithTools(array $messages, array $tools, ?ToolOptions $options = null): CompletionResponse
+chatWithToolsForConfiguration(array $messages, array $tools, LlmConfiguration $configuration, ?ToolOptions $options = null): CompletionResponse
+clearCache(): void
+complete(string $prompt, ?ChatOptions $options = null): CompletionResponse
+complete(string $prompt, array $options = []): CompletionResponse
+completeCreative(string $prompt, ?ChatOptions $options = null): CompletionResponse
+completeFactual(string $prompt, ?ChatOptions $options = null): CompletionResponse
+completeJson(string $prompt, ?ChatOptions $options = null): array
+completeMarkdown(string $prompt, ?ChatOptions $options = null): string
+completeStructured(string $prompt, array $schema, ?ChatOptions $options = null): array
+configure(array $config): void
+cosineSimilarity(array $a, array $b): float
+countEnvelopes(): int
+decrypt(string $encryptedValue, string $encryptedDek, string $dekNonce, string $valueNonce, string $identifier): string
+decrypt(string $encryptedValue, string $encryptedDek, string $dekNonce, string $valueNonce, string $identifier, int $encryptionVersion = 1, string $encryptionAlgorithm = ''): string
+delete(string $identifier, string $reason = ''): void
+detectLanguage(string $text, ?TranslationOptions $options = null): string
+doSomething1(string $whatever): string
+doSomething10(string $whatever): string
+doSomething2(string $whatever): string
+doSomething3(string $whatever): string
+doSomething4(string $whatever): string
+doSomething5(string $whatever): string
+doSomething6(string $whatever): string
+doSomething7(string $whatever): string
+doSomething8(string $whatever): string
+doSomething9(string $whatever): string
+embed(string $text, ?EmbeddingOptions $options = null): array
+embed(string|array $input, ?EmbeddingOptions $options = null): EmbeddingResponse
+embedBatch(array $texts, ?EmbeddingOptions $options = null): array
+embedBatchForConfiguration(array $texts, LlmConfiguration $configuration, ?EmbeddingOptions $options = null): array
+embedForConfiguration(string $text, LlmConfiguration $configuration, ?EmbeddingOptions $options = null): array
+embedForConfiguration(string|array $input, LlmConfiguration $configuration, ?EmbeddingOptions $options = null): EmbeddingResponse
+embedFull(string $text, ?EmbeddingOptions $options = null): EmbeddingResponse
+embeddings(string|array $input, array $options = []): EmbeddingResponse
+encrypt(string $plaintext, string $identifier): EncryptedData
+encrypt(string $plaintext, string $identifier): array
+exists(string $identifier): bool
+extractFromAttributeValueOrStyle(array $attributes, string $imageAttribute)
+extractTransUnit(\\XMLReader $reader)
+fifthMethod($one, $two)
+findMostSimilar(array $queryVector, array $candidates, int $topK = 5): array
+firstMethod($one, $two)
+fourthMethod($one, $two)
+fuse(array $rankedKeyLists, int $k = 60, array $weights = []): array
+generateAltText(string|array $imageUrl, ?VisionOptions $options = null): string|array
+generateDek(): string
+generateDescription(string|array $imageUrl, ?VisionOptions $options = null): string|array
+generateTitle(string|array $imageUrl, ?VisionOptions $options = null): string|array
+getAdditionalCssClasses()
+getAvailableModels(): array
+getAvailableProviders(): array
+getChartData()
+getContext()
+getCssFiles()
+getDate()
+getDate(): int
+getDefaultModel(): string
+getDescription()
+getDescription(): string
+getDetailedStatus()
+getEventData()
+getGroupNames()
+getHeight()
+getIconIdentifier()
+getIdentifier()
+getIdentifier(): string
+getImageHeightFromAttributes(array $attributes): int
+getImageWidthFromAttributes(array $attributes): int
+getItems()
+getJsFiles()
+getLabel()
+getLastErrors()
+getLink()
+getMaxImageSize(): int
+getMetadata(string $identifier): SecretDetails
+getMetadata(string $identifier): array
+getName(): string
+getNumber()
+getOptions()
+getProvider(): string
+getProvider(?string $identifier = null): ProviderInterface
+getReport()
+getReport(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
+getRequireJsModules()
+getServiceName()
+getSomething()
+getStatus()
+getStatus(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
+getSupportedImageFormats(): array
+getTables(): array
+getTarget()
+getText(): string
+getTitle()
+getTranslation(string $component, string $type, string $placeholder, int $languageUid = 0)
+getUrl()
+getUrlWithParams()
+getVector(): array
+getWidth()
+handleError($errorLevel, $errorMessage, $errorFile, $errorLine)
+hasThinking(): bool
+hasToolCalls(): bool
+http(): VaultHttpClientInterface
+identifyValue(string $value)
+imagePages(string $absolutePath): array
+infoAction(ServerRequestInterface $request): ResponseInterface
+instanceMethod($foo)
+isAvailable(): bool
+isComplete(): bool
+isSealed(string $value): bool
+isSecretIdentifier(string $identifier, SecretIdentifierKind $kind): bool
+isXliffNamespace(?string $uri)
+list(?string $pattern = null): array
+list(?string $pattern = null, bool $includeDisabled = false): array
+list(string $pattern = null): array
+log($level, $string)
+mainAction(ServerRequestInterface $request): ResponseInterface
+matchStyleAttribute($styleAttribute, $imageAttribute)
+meetsConfidence(float $threshold): bool
+modifyRteField($value)
+normalize(array $vector): array
+open(string $sealed, string $identifier): string
+pairwiseSimilarities(array $vectors): array
+parseImageAttributes($html)
+parseLinkWithImages($html)
+parseTransUnits(string $xmlContent)
+processDatamap_postProcessFieldArray($status, $table, $id, &$fieldArray, &$dataHandler)
+reEncryptDek(string $encryptedDek, string $dekNonce, string $identifier, string $oldMasterKey, string $newMasterKey): ReEncryptedDek
+reEncryptDek(string $encryptedDek, string $dekNonce, string $identifier, string $oldMasterKey, string $newMasterKey): array
+reEncryptDek(string $encryptedDek, string $dekNonce, string $identifier, string $oldMasterKey, string $newMasterKey, int $encryptionVersion = 1, string $encryptionAlgorithm = ''): ReEncryptedDek
+redact(string $text, bool $includeEmails = false): string
+render($template)
+render(ImageRenderingDto $imageData, ServerRequestInterface $request): string
+renderDocument(string $absolutePath): array
+renderImageAttributes($content, $conf)
+renderInlineLink($content, $conf, $request)
+renderPage(string $absolutePath, int $page): string
+renderWidgetContent()
+rerank(string $query, array $candidates): array
+resolve($attributes, $conf, $request, $linkAttributes = null)
+resolveFieldConfigurationAndRespectColumnsOverrides($dataHandler, $table, $field)
+retrieve(?string $identifier)
+retrieve(string $identifier)
+retrieveForFrontend(string $identifier)
+returnClassConstant()
+returnClassFromOtherNamespace()
+returnClassFromSameNamespace()
+returnExceptionInstance()
+returnGlobalConstant()
+returnScalarType()
+returnUnionType()
+rewrap(string $sealed, string $identifier): string
+rewrap(string $sealed, string $identifier, string $oldMasterKey, string $newMasterKey): string
+rewrapAll(EnvelopeRotationContext $context): int
+rotate(string $identifier, string $newSecret, string $reason = ''): void
+scoreTranslationQuality(string $sourceText, string $translatedText, string $targetLanguage, ?TranslationOptions $options = null): float
+seal(string $plaintext, string $identifier): string
+search(string $query, int $limit, ?int $languageId = null): array
+secondMethod($one, $two)
+sendRequest(RequestInterface $request): ResponseInterface
+setContext(Context $context)
+setDate($year, $month, $day)
+setDate(int $year, int $month, int $day)
+setEnabled(string $identifier, bool $enabled, string $reason = ''): void
+setExceptionalErrors($exceptionalErrors)
+setRequest(ServerRequestInterface $request)
+setTime($hour, $minute[, $second])
+setUrl(string url)
+store(string $identifier, string $secret, array $options = []): void
+streamChat(array $messages, ?ChatOptions $options = null): Generator
+streamChatCompletion(array $messages, array $options = []): Generator
+supportsFeature(string|ModelCapability $feature): bool
+supportsStreaming(): bool
+supportsTools(): bool
+supportsVision(): bool
+testConnection(): array
+thirdMethod($one, $two)
+toArray(): array
+translate(string $text, string $targetLanguage, ?string $sourceLanguage = null, ?TranslationOptions $options = null): TranslationResult
+translateBatch(array $texts, string $targetLanguage, ?string $sourceLanguage = null, ?TranslationOptions $options = null): array
+translateForConfiguration(string $text, string $targetLanguage, LlmConfiguration $configuration, ?string $sourceLanguage = null, ?TranslationOptions $options = null): TranslationResult
+update($arg = '', $arg2 = [], $arg3 = [])
+vision(array $content, ?VisionOptions $options = null): VisionResponse
+wasFiltered(): bool
+wasTruncated(): bool
+withAuthentication(string $secretIdentifier, SecretPlacement $placement = SecretPlacement::Bearer, array $options = []): static
+withFrequencyPenalty(float $penalty): self
+withMaxTokens(int $maxTokens): self
+withModel(string $model): self
+withOAuth(OAuthConfig $config, string $reason = 'OAuth2 API call'): static
+withPresencePenalty(float $penalty): self
+withProvider(string $provider): self
+withReason(string $reason): static
+withResponseFormat(string $format): self
+withResponseSchema(array $schema): self
+withStopSequences(array $sequences): self
+withSystemPrompt(string $prompt): self
+withTemperature(float $temperature): self
+withTimeout(int $seconds): static
+withTopP(float $topP): self
