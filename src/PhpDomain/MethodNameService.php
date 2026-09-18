@@ -26,10 +26,7 @@ use const T_COMMENT;
 use const T_CONSTANT_ENCAPSED_STRING;
 use const T_DNUMBER;
 use const T_DOC_COMMENT;
-use const T_INLINE_HTML;
 use const T_LNUMBER;
-use const T_OPEN_TAG;
-use const T_OPEN_TAG_WITH_ECHO;
 use const T_VARIABLE;
 use const T_WHITESPACE;
 
@@ -197,8 +194,9 @@ class MethodNameService
             }
 
             /* A closing tag ends the PHP the lexer was handed, so everything after it arrives
-               as one lump of inline HTML. Appending that lump renders a signature nobody wrote. */
-            if (is_array($token) && in_array($token[0], [T_INLINE_HTML, T_OPEN_TAG, T_OPEN_TAG_WITH_ECHO, T_CLOSE_TAG], true)) {
+               as one lump of inline HTML. Appending that lump renders a signature nobody wrote.
+               The tag itself is always the first of the two tokens, so it is the one to catch. */
+            if (is_array($token) && $token[0] === T_CLOSE_TAG) {
                 return null;
             }
 
