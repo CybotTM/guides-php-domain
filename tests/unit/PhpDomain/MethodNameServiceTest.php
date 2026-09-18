@@ -316,6 +316,56 @@ final class MethodNameServiceTest extends TestCase
 
             // A trailing comma is legal since PHP 8.0 and announces no further parameter.
             'trailing comma in the parameter list' => ['write(string $part,)', 'write', ['string $part'], null],
+
+            // Type syntax the parser accepts and nothing pinned: the bracket shorthand, a type
+            // name outside ASCII, a float and an optional numeric shape key, a negative bound,
+            // and the callable forms whose parentheses are real brackets rather than a cast.
+            'array shorthand return type' => ['all(): int[]', 'all', [], 'int[]'],
+            'array shorthand on a shape' => ['all(): array{a: int}[]', 'all', [], 'array{a: int}[]'],
+            'array shorthand on a generic' => ['all(): list<int>[]', 'all', [], 'list<int>[]'],
+            'non-ASCII return type' => ['all(): Bär', 'all', [], 'Bär'],
+            'float as a shape key' => ['all(): array{1.5: int}', 'all', [], 'array{1.5: int}'],
+            'optional numeric shape key' => ['all(): array{0?: string}', 'all', [], 'array{0?: string}'],
+            'negative bound in a range' => ['all(): int<-1, 1>', 'all', [], 'int<-1, 1>'],
+            'callable return type with several parameters' => [
+                'run(): callable(Foo, Bar): void',
+                'run',
+                [],
+                'callable(Foo, Bar): void',
+            ],
+            'callable return type with a named parameter' => [
+                'run(): Closure(int $a): void',
+                'run',
+                [],
+                'Closure(int $a): void',
+            ],
+            'callable inside a union return type' => [
+                'run(): (callable(int): string)|null',
+                'run',
+                [],
+                '(callable(int): string)|null',
+            ],
+
+            // Parameter syntax the parser accepts and nothing pinned.
+            'assignment inside an attribute before a generic' => [
+                'store(#[Attr(x = 1)] array<int, string> $a)',
+                'store',
+                ['#[Attr(x = 1)] array<int, string> $a'],
+                null,
+            ],
+            'generic after a parameter with a default' => [
+                'store(int $a = 1, array<int, string> $b)',
+                'store',
+                ['int $a = 1', 'array<int, string> $b'],
+                null,
+            ],
+            'variadic by reference' => ['collect(array &...$rows)', 'collect', ['array &...$rows'], null],
+            'signature broken across lines' => [
+                "wrap(int \$a,\n    string \$b): void",
+                'wrap',
+                ['int $a', 'string $b'],
+                'void',
+            ],
         ];
     }
 
@@ -417,6 +467,26 @@ final class MethodNameServiceTest extends TestCase
             'return type that is not valid UTF-8' => ["broken(): str\xFFing"],
             'parameter type that is not valid UTF-8' => ["broken(str\xFFing \$a)"],
             'parameter name that is not valid UTF-8' => ["broken(int \$a\xFF)"],
+
+            // A qualified name lexes as one token, so only the shape of a label rejects it.
+            'qualified name instead of a method name' => ['Foo\\Bar(int $a)'],
+
+            // Each operator that cannot open a type, and each that cannot end one.
+            'intersection operator instead of a return type' => ['broken(): &string'],
+            'hyphen instead of a return type' => ['broken(): -string'],
+            'square bracket instead of a return type' => ['broken(): [int]'],
+            'angle bracket instead of a return type' => ['broken(): <int>'],
+            'return type ending in a hyphen' => ['broken(): non-'],
+            'return type ending in a callable colon' => ['broken(): callable():'],
+
+            // A comma joins the keys of a shape, not two types; a colon needs a callable before it.
+            'comma between two return types' => ['broken(): int,string'],
+            'colon without a callable parameter list' => ['broken(): string: int'],
+
+            // Each comment kind, and a closing tag with nothing reopening after it.
+            'doc comment inside the parameter list' => ['broken(int $a /** d */)'],
+            'closing tag with nothing after it' => ['broken(int $a ?>)'],
+            'closing tag ending the signature' => ['broken(int $a ?>'],
         ];
     }
 
