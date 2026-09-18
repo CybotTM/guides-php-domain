@@ -177,6 +177,18 @@ final class MethodNameServiceTest extends TestCase
                 [],
                 'array<int|>',
             ],
+            'pipe with a comparison operator after it' => [
+                'get(int |>= $a)',
+                'get',
+                ['int |>= $a'],
+                null,
+            ],
+            'pipe with a shift-assign operator after it' => [
+                'get(int |>>= $a)',
+                'get',
+                ['int |>>= $a'],
+                null,
+            ],
             'attribute on a parameter' => [
                 'setPassword(#[\\SensitiveParameter] string $password): void',
                 'setPassword',
@@ -540,6 +552,7 @@ final class MethodNameServiceTest extends TestCase
             'parameter list closed by a brace' => ['broken(int $a}'],
             'stray angle bracket in the parameter list' => ['broken(int $a>): void'],
             'pipe and angle bracket closing no generic' => ['broken(int|> $a)'],
+            'pipe and angle bracket followed by an equals sign' => ['broken(): array<int|>='],
             'square bracket closed by a parenthesis in a default' => ['broken(array $a = [1, 2)): void'],
             'shaped array return type closed by a square bracket' => ['broken(int $a): array{name: string]'],
             'return type closing a bracket it never opened' => ['broken(): string)('],
