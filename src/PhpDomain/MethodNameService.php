@@ -89,11 +89,13 @@ class MethodNameService
      * brackets of PHPStan and Psalm syntax. Everything else is prose, punctuation or code that
      * an author wrote after the signature, and accepting it renders that text as a type.
      *
-     * @param int|null $id  the token id, null for a single-character token
-     * @param bool $nested  whether the token sits inside a bracket of the type
+     * @param int|null $id      the token id, null for a single-character token
+     * @param string   $closer  the closer owed by the innermost bracket of the type, '' at the top
      */
-    private function isReturnTypeToken(string $text, int|null $id, bool $nested): bool
+    private function isReturnTypeToken(string $text, int|null $id, string $closer): bool
     {
+        $nested = $closer !== '';
+
         // `&` and `>>` reach this as named tokens, so operators are matched by text, not by id.
         if (in_array($text, ['?', '|', '&', '-', '(', ')', '[', ']', '{', '}', '<', '>', '>>'], true)) {
             return true;
@@ -107,7 +109,18 @@ class MethodNameService
         // A shape separates its keys with a comma and names them with a colon, and marks itself
         // unsealed with `...`. Neither has a meaning outside the brackets, where a comma would
         // announce a second type.
-        if ($nested && in_array($text, [',', ':', '...', '=', '"'], true)) {
+        if ($nested && in_array($text, [',', ':', '...'], true)) {
+            return true;
+        }
+
+        // A callable marks an optional parameter with `=`, inside its own parentheses.
+        if ($text === '=' && $closer === ')') {
+            return true;
+        }
+
+        // A quoted string is a type and a shape key alike, and PHP's lexer splits one that
+        // holds a `$` into its quotes and the variable it thinks it found between them.
+        if ($text === '"' && $nested) {
             return true;
         }
 
@@ -194,6 +207,7 @@ class MethodNameService
         $lastReturnToken = '';
         $sawDefault = false;
         $constantName = false;
+        $pendingSign = false;
 
         foreach ($tokens as $token) {
             $text = is_array($token) ? $token[1] : $token;
@@ -318,9 +332,12 @@ class MethodNameService
                 // a `*` belongs to a constant name until something that is not one ends it. As
                 // a generic argument it is a wildcard. Anywhere else a `*` is arithmetic.
                 $constantWildcard = $text === '*'
-                    && ($constantName || ($closers[count($closers) - 1] ?? '') === '>');
+                    && ($constantName
+                        || (($closers[count($closers) - 1] ?? '') === '>' && in_array($lastReturnToken, ['<', ','], true)));
 
-                if (!$callableColon && !$constantWildcard && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
+                $closer = $closers[count($closers) - 1] ?? '';
+
+                if (!$callableColon && !$constantWildcard && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closer)) {
                     return null;
                 }
 
@@ -345,9 +362,15 @@ class MethodNameService
                     return null;
                 }
 
-                // A type opens with a name, a `?` or the parenthesis of a DNF type. A bracket
-                // or an operator in that position is not a type at all, as in `foo(): {}`.
-                if ($lastReturnToken === '' && in_array($text, ['|', '&', '-', '::', ')', '[', ']', '{', '}', '<', '>'], true)) {
+                // A type opens with a name, a `?`, the parenthesis of a DNF type, a literal, or
+                // the minus sign of a negative one — `-1|0|1` is a set a manual returns.
+                if ($pendingSign && !in_array(is_array($token) ? $token[0] : null, [T_LNUMBER, T_DNUMBER], true)) {
+                    return null;
+                }
+
+                $pendingSign = $lastReturnToken === '' && $text === '-';
+
+                if ($lastReturnToken === '' && in_array($text, ['|', '&', '::', ')', '[', ']', '{', '}', '<', '>'], true)) {
                     return null;
                 }
 
@@ -364,7 +387,7 @@ class MethodNameService
                 }
 
                 $constantName = $text === '::'
-                    || ($constantName && ($text === '*' || $this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, false)));
+                    || ($constantName && ($text === '*' || $this->isIdentifier($text)));
 
                 $lastReturnToken = $text;
                 $return .= $text;
