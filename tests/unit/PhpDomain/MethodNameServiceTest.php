@@ -168,6 +168,15 @@ final class MethodNameServiceTest extends TestCase
                 [],
                 'array{a: protected(set)}',
             ],
+
+            // PHP 8.5 lexes `|>` as one token where earlier versions lex two. Only the `>` in
+            // it closes a bracket, so a generic ends where it ends on every version.
+            'pipe and angle bracket lexed as one token' => [
+                'get(): array<int|>',
+                'get',
+                [],
+                'array<int|>',
+            ],
             'attribute on a parameter' => [
                 'setPassword(#[\\SensitiveParameter] string $password): void',
                 'setPassword',
@@ -530,6 +539,7 @@ final class MethodNameServiceTest extends TestCase
             'parameter list closed by a square bracket' => ['broken(int $a]'],
             'parameter list closed by a brace' => ['broken(int $a}'],
             'stray angle bracket in the parameter list' => ['broken(int $a>): void'],
+            'pipe and angle bracket closing no generic' => ['broken(int|> $a)'],
             'square bracket closed by a parenthesis in a default' => ['broken(array $a = [1, 2)): void'],
             'shaped array return type closed by a square bracket' => ['broken(int $a): array{name: string]'],
             'return type closing a bracket it never opened' => ['broken(): string)('],

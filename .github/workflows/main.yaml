@@ -13,6 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `MethodNameService` reads a signature with `token_get_all()`, whose tokenisation
+        # changes between versions: 8.4 merges `private(set)` into one token and 8.5 merges
+        # `|>`. Both are guarded so a manual renders the same whichever PHP renders it, and
+        # those guards can only fail on a version that produces the merged token.
         php:
           - '8.2'
           - '8.3'
