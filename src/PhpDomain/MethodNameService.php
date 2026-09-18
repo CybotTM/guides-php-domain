@@ -8,7 +8,6 @@ use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
 use Psr\Log\LoggerInterface;
 use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 
-use function array_merge;
 use function array_pop;
 use function array_slice;
 use function constant;
@@ -30,7 +29,6 @@ use const T_CONSTANT_ENCAPSED_STRING;
 use const T_DNUMBER;
 use const T_DOC_COMMENT;
 use const T_LNUMBER;
-use const T_STRING;
 use const T_VARIABLE;
 use const T_WHITESPACE;
 
@@ -77,8 +75,11 @@ class MethodNameService
      * than quietly changing what a manual renders.
      *
      * The `|>` case re-lexes rather than listing what may follow, because 8.4 munches maximally
-     * from that `>`: `|>=` was `>=`, `|>>=` was `>>=`, `|>==` was `>=` and `=`. Putting the `>`
-     * back in front of the remaining text and lexing it again reproduces that by construction.
+     * from that `>`: `|>=` was `>=`, `|>>=` was `>>=`, `|>==` was `>=` and `=`. Re-lexing the
+     * `>` together with the one token after it reproduces that without enumerating it.
+     *
+     * Only tokens whose merging depends on the version are undone. `(int)` is a cast on every
+     * version and is left as the one token it always was.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      *
@@ -110,8 +111,13 @@ class MethodNameService
             }
 
             if (in_array($token[0], $merged, true) && preg_match('/^([A-Za-z_]*)\\((\\s*)([A-Za-z]+)(\\s*)\\)$/', $token[1], $parts) === 1) {
+                // The word is lexed on its own, so it carries the id PHP gives it — `private`
+                // is `T_PRIVATE`, `void` a plain name — rather than a guessed one. Lexing the
+                // whole text again would only merge it back into the token being taken apart.
+                $word = @token_get_all('<?php ' . $parts[3])[1];
+
                 if ($parts[1] !== '') {
-                    $result[] = [T_STRING, $parts[1], $token[2]];
+                    $result[] = @token_get_all('<?php ' . $parts[1])[1];
                 }
 
                 $result[] = '(';
@@ -120,7 +126,7 @@ class MethodNameService
                     $result[] = [T_WHITESPACE, $parts[2], $token[2]];
                 }
 
-                $result[] = [T_STRING, $parts[3], $token[2]];
+                $result[] = $word;
 
                 if ($parts[4] !== '') {
                     $result[] = [T_WHITESPACE, $parts[4], $token[2]];
@@ -131,18 +137,34 @@ class MethodNameService
             }
 
             if ($pipe !== null && $token[0] === $pipe) {
-                $rest = '>';
+                // 8.4 lexed `|` and then munched maximally from the `>`. Only `=` and `>` can
+                // extend an operator that starts with one, so the munch reaches exactly as far
+                // as the run of tokens made of those two characters — never into a string, a
+                // name or whitespace. Re-lexing that run reproduces the older reading without
+                // restarting the lexer over the rest, which would read a string's closing
+                // quote as an opening one.
+                $run = '>';
+                $ahead = $index + 1;
 
-                for ($ahead = $index + 1; $ahead < $total; $ahead++) {
-                    $rest .= is_array($tokens[$ahead]) ? $tokens[$ahead][1] : $tokens[$ahead];
+                while ($ahead < $total) {
+                    $text = is_array($tokens[$ahead]) ? $tokens[$ahead][1] : $tokens[$ahead];
+
+                    if (preg_match('/^[=>]+$/', $text) !== 1) {
+                        break;
+                    }
+
+                    $run .= $text;
+                    $ahead++;
                 }
 
                 $result[] = '|';
 
-                /** @var list<array{0: int, 1: string, 2: int}|string> $relexed */
-                $relexed = array_slice(@token_get_all('<?php ' . $rest), 1);
+                foreach (array_slice(@token_get_all('<?php ' . $run), 1) as $part) {
+                    $result[] = $part;
+                }
 
-                return array_merge($result, $this->normaliseMergedTokens($relexed));
+                $index = $ahead - 1;
+                continue;
             }
 
             $result[] = $token;
@@ -155,8 +177,8 @@ class MethodNameService
      * Pops the generic brackets an angle-bracket token closes.
      *
      * `>>` ends two generics but lexes as one token, so `array<int, list<string>>` closes both
-     * of its brackets at once. Only `>` and `>>` reach this — `splitPipeTokens()` has already
-     * taken PHP 8.5's `|>` apart — so the text is as many brackets as it is characters long.
+     * of its brackets at once. Only `>` and `>>` reach this — `normaliseMergedTokens()` has
+     * already taken PHP 8.5's `|>` apart — so the text is as many brackets as characters.
      * Returns false when the brackets do not match, which leaves the caller to reject the
      * signature rather than repair it.
      *
