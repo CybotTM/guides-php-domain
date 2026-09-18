@@ -107,7 +107,7 @@ class MethodNameService
         // A shape separates its keys with a comma and names them with a colon, and marks itself
         // unsealed with `...`. Neither has a meaning outside the brackets, where a comma would
         // announce a second type.
-        if ($nested && in_array($text, [',', ':', '...'], true)) {
+        if ($nested && in_array($text, [',', ':', '...', '=', '"'], true)) {
             return true;
         }
 
@@ -121,10 +121,16 @@ class MethodNameService
             return true;
         }
 
-        // `$this` is a type PHPStan understands. Every other variable, and every literal, is a
-        // shaped-array key — outside the brackets it is a value where a type was announced.
-        if (in_array($id, [T_LNUMBER, T_DNUMBER, T_CONSTANT_ENCAPSED_STRING, T_VARIABLE], true)) {
+        // `$this` is a type PHPStan understands. Every other variable is a value where a type
+        // was announced, except inside a shape, where it can only be a key.
+        if ($id === T_VARIABLE) {
             return $nested || $text === '$this';
+        }
+
+        // A literal is a type of its own — `0|1` and `'a'|'b'` are how a manual writes the set
+        // of values a method returns — and it is a shape key inside the brackets.
+        if (in_array($id, [T_LNUMBER, T_DNUMBER, T_CONSTANT_ENCAPSED_STRING], true)) {
+            return true;
         }
 
         // Every other word: a type name, qualified or not, and the keywords a type name lexes
@@ -187,6 +193,7 @@ class MethodNameService
         $afterWhitespace = false;
         $lastReturnToken = '';
         $sawDefault = false;
+        $constantName = false;
 
         foreach ($tokens as $token) {
             $text = is_array($token) ? $token[1] : $token;
@@ -307,8 +314,11 @@ class MethodNameService
                 // closed parameter list belongs to the type even at the top level.
                 $callableColon = $text === ':' && $closers === [] && str_ends_with($lastReturnToken, ')');
 
-                // `Foo::*` names every constant of a class. A `*` anywhere else is arithmetic.
-                $constantWildcard = $text === '*' && $lastReturnToken === '::';
+                // `Foo::FOO_*` names every constant of a class whose name starts that way, so
+                // a `*` belongs to a constant name until something that is not one ends it. As
+                // a generic argument it is a wildcard. Anywhere else a `*` is arithmetic.
+                $constantWildcard = $text === '*'
+                    && ($constantName || ($closers[count($closers) - 1] ?? '') === '>');
 
                 if (!$callableColon && !$constantWildcard && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
                     return null;
@@ -321,8 +331,8 @@ class MethodNameService
                     $closers === []
                     && $wasAfterWhitespace
                     && $lastReturnToken !== ''
-                    && !in_array($text, ['|', '&'], true)
-                    && !in_array($lastReturnToken, ['|', '&', '?', ':'], true)
+                    && !in_array($text, ['|', '&', '::'], true)
+                    && !in_array($lastReturnToken, ['|', '&', '?', ':', '::'], true)
                     && !$callableColon
                 ) {
                     return null;
@@ -352,6 +362,9 @@ class MethodNameService
                         return null;
                     }
                 }
+
+                $constantName = $text === '::'
+                    || ($constantName && ($text === '*' || $this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, false)));
 
                 $lastReturnToken = $text;
                 $return .= $text;
