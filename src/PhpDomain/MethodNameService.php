@@ -15,6 +15,8 @@ use function in_array;
 use function is_array;
 use function preg_match;
 use function sprintf;
+use function str_ends_with;
+use function strlen;
 use function token_get_all;
 use function trim;
 
@@ -55,6 +57,26 @@ class MethodNameService
     }
 
     /**
+     * Pops the generic brackets an angle-bracket token closes.
+     *
+     * `>>` ends two generics but lexes as one token, so `array<int, list<string>>` closes both
+     * of its brackets at once. Returns false when the brackets do not match, which leaves the
+     * caller to reject the signature rather than repair it.
+     *
+     * @param list<string> $closers
+     */
+    private function closeAngleBrackets(string $text, array &$closers): bool
+    {
+        for ($count = strlen($text); $count > 0; $count--) {
+            if (array_pop($closers) !== '>') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Whether the token may appear in a return type.
      *
      * A return type is a closed vocabulary — type names, the operators joining them, and the
@@ -66,8 +88,8 @@ class MethodNameService
      */
     private function isReturnTypeToken(string $text, int|null $id, bool $nested): bool
     {
-        // `&` reaches this as a named token, so the operators are matched by text, not by id.
-        if (in_array($text, ['?', '|', '&', '-', '(', ')', '[', ']', '{', '}', '<', '>'], true)) {
+        // `&` and `>>` reach this as named tokens, so operators are matched by text, not by id.
+        if (in_array($text, ['?', '|', '&', '-', '(', ')', '[', ']', '{', '}', '<', '>', '>>'], true)) {
             return true;
         }
 
@@ -81,9 +103,16 @@ class MethodNameService
             return false;
         }
 
-        if (in_array($id, [T_LNUMBER, T_DNUMBER, T_CONSTANT_ENCAPSED_STRING, T_VARIABLE], true)) {
-            // A shaped-array key, and `$this`, which is a type PHPStan understands.
+        // A parenthesised scalar lexes as a cast, so `callable(int): string` never reaches the
+        // bracket stack as brackets. The token is balanced by construction and carries a type.
+        if (preg_match('/^\\(\\s*[A-Za-z]+\\s*\\)$/', $text) === 1) {
             return true;
+        }
+
+        // `$this` is a type PHPStan understands. Every other variable, and every literal, is a
+        // shaped-array key — outside the brackets it is a value where a type was announced.
+        if (in_array($id, [T_LNUMBER, T_DNUMBER, T_CONSTANT_ENCAPSED_STRING, T_VARIABLE], true)) {
+            return $nested || $text === '$this';
         }
 
         // Every other word: a type name, qualified or not, and the keywords a type name lexes
@@ -145,6 +174,7 @@ class MethodNameService
         $state = 'name';
         $afterWhitespace = false;
         $lastReturnToken = '';
+        $sawDefault = false;
 
         foreach ($tokens as $token) {
             $text = is_array($token) ? $token[1] : $token;
@@ -176,8 +206,29 @@ class MethodNameService
             }
 
             if ($state === 'params') {
-                // `#[` is one token, and the `]` closing an attribute is a separate one. An
-                // angle bracket is not a bracket here: `<` is a comparison in a default value.
+                // An angle bracket is a generic in the type of a parameter and a comparison in
+                // its default value, and the `=` is what separates the two. Without this, the
+                // comma of `array<int, string> $rows` splits the parameter in half.
+                if ($text === '=' && count($closers) === 1) {
+                    $sawDefault = true;
+                }
+
+                if ($text === '<' && !$sawDefault) {
+                    $closers[] = '>';
+                    $parameter .= $text;
+                    continue;
+                }
+
+                if (($text === '>' || $text === '>>') && ($closers[count($closers) - 1] ?? '') === '>') {
+                    if (!$this->closeAngleBrackets($text, $closers)) {
+                        return null;
+                    }
+
+                    $parameter .= $text;
+                    continue;
+                }
+
+                // `#[` is one token, and the `]` closing an attribute is a separate one.
                 if ($text !== '<' && isset($openers[$text])) {
                     $closers[] = $openers[$text];
                 } elseif (in_array($text, [')', ']', '}'], true)) {
@@ -196,6 +247,7 @@ class MethodNameService
                 } elseif ($text === ',' && count($closers) === 1) {
                     $params[] = trim($parameter);
                     $parameter = '';
+                    $sawDefault = false;
                     continue;
                 }
 
@@ -223,7 +275,11 @@ class MethodNameService
                     continue;
                 }
 
-                if (!$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
+                // `callable(int): string` names its own return type, so a colon that follows a
+                // closed parameter list belongs to the type even at the top level.
+                $callableColon = $text === ':' && $closers === [] && str_ends_with($lastReturnToken, ')');
+
+                if (!$callableColon && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
                     return null;
                 }
 
@@ -235,7 +291,7 @@ class MethodNameService
                     && $wasAfterWhitespace
                     && $lastReturnToken !== ''
                     && !in_array($text, ['|', '&'], true)
-                    && !in_array($lastReturnToken, ['|', '&'], true)
+                    && !in_array($lastReturnToken, ['|', '&', '?', ':'], true)
                 ) {
                     return null;
                 }
@@ -246,10 +302,16 @@ class MethodNameService
                     return null;
                 }
 
-                if (isset($openers[$text])) {
-                    $closers[] = $openers[$text];
-                } elseif (in_array($text, [')', ']', '}', '>'], true) && array_pop($closers) !== $text) {
+                if (($text === '>' || $text === '>>') && !$this->closeAngleBrackets($text, $closers)) {
                     return null;
+                }
+
+                if ($text !== '>' && $text !== '>>') {
+                    if (isset($openers[$text])) {
+                        $closers[] = $openers[$text];
+                    } elseif (in_array($text, [')', ']', '}'], true) && array_pop($closers) !== $text) {
+                        return null;
+                    }
                 }
 
                 $lastReturnToken = $text;
@@ -267,7 +329,9 @@ class MethodNameService
         }
 
         // A colon announces a return type, so an empty one is a broken signature rather than none.
-        if ($state === 'return' && $return === '') {
+        // A type that ends on an operator is the same thing half written — `string|` names one
+        // type and promises another, and rendering it is how a truncation looks on the page.
+        if ($state === 'return' && ($return === '' || in_array($lastReturnToken, ['?', '|', '&', '-', ':'], true))) {
             return null;
         }
 
