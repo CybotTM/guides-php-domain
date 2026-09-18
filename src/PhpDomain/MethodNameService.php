@@ -8,14 +8,14 @@ use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
 use Psr\Log\LoggerInterface;
 use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 
-use function ctype_alnum;
-use function ctype_alpha;
 use function is_array;
+use function preg_match;
 use function sprintf;
-use function str_split;
 use function token_get_all;
 use function trim;
 
+use const T_COMMENT;
+use const T_DOC_COMMENT;
 use const T_WHITESPACE;
 
 class MethodNameService
@@ -38,21 +38,7 @@ class MethodNameService
     /** Whether the text is shaped like a PHP label, which is what a method name has to be. */
     private function isIdentifier(string $text): bool
     {
-        if ($text === '') {
-            return false;
-        }
-
-        if (!ctype_alpha($text[0]) && $text[0] !== '_') {
-            return false;
-        }
-
-        foreach (str_split($text) as $character) {
-            if (!ctype_alnum($character) && $character !== '_') {
-                return false;
-            }
-        }
-
-        return true;
+        return preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $text) === 1;
     }
 
     /**
@@ -69,13 +55,20 @@ class MethodNameService
      * which is not a `ParseError` and would abort the whole run. Lexing carries no such
      * version boundary: the structure below is derived from parentheses and commas only.
      *
+     * Nothing but the signature is lexed — no body is appended — so a return type carries its
+     * own braces and angle brackets, which PHPStan and Psalm array shapes are written with.
+     * Braces are therefore counted in the return type exactly as they are in the parameter
+     * list, under one rule: a brace separated from the type by whitespace is not signature
+     * text. `array{name: string}` is a type, `string {}` is a method body, and the second is
+     * rejected so the author is told rather than shown a return type that is missing its tail.
+     *
      * @return array{name: string, params: list<string>, return: string|null}|null
      *         null when the text is not a method signature
      */
     private function splitSignature(string $signature): array|null
     {
         /** @var list<array{0: int, 1: string, 2: int}|string> $tokens */
-        $tokens = @token_get_all('<?php function ' . $signature . ' {}');
+        $tokens = @token_get_all('<?php function ' . $signature);
 
         $name = '';
         $nameTokens = 0;
@@ -85,10 +78,20 @@ class MethodNameService
         $depth = 0;
         $state = 'name';
         $closed = false;
+        $afterWhitespace = false;
 
         foreach ($tokens as $token) {
             $text = is_array($token) ? $token[1] : $token;
             $isWhitespace = is_array($token) && $token[0] === T_WHITESPACE;
+
+            // A comment carries text the renderer would have to drop, and dropping it silently
+            // is how a signature ends up rendered without the half its author hid behind `//`.
+            if (is_array($token) && ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT)) {
+                return null;
+            }
+
+            $wasAfterWhitespace = $afterWhitespace;
+            $afterWhitespace = $isWhitespace;
 
             if ($state === 'name') {
                 // The opening tag and the `function` keyword this method added itself.
@@ -108,7 +111,8 @@ class MethodNameService
             }
 
             if ($state === 'params') {
-                if ($text === '(' || $text === '[' || $text === '{') {
+                // `#[` is one token, and the `]` closing an attribute is a separate one.
+                if ($text === '(' || $text === '[' || $text === '{' || $text === '#[') {
                     $depth++;
                 } elseif ($text === ')' || $text === ']' || $text === '}') {
                     $depth--;
@@ -142,17 +146,24 @@ class MethodNameService
                     continue;
                 }
 
-                // The body this method added itself; anything else does not belong to a signature.
-                if ($text === '{') {
-                    break;
-                }
-
+                // A method body, or any other trailing text, does not belong to a signature.
                 return null;
             }
 
             if ($state === 'return') {
-                if ($text === '{') {
-                    break;
+                if ($text === '(' || $text === '[' || $text === '{') {
+                    // A brace the type does not hang on opens a body, not an array shape.
+                    if ($text === '{' && $depth === 0 && $wasAfterWhitespace) {
+                        return null;
+                    }
+
+                    $depth++;
+                } elseif ($text === ')' || $text === ']' || $text === '}') {
+                    $depth--;
+
+                    if ($depth < 0) {
+                        return null;
+                    }
                 }
 
                 $return .= $text;

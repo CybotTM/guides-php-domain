@@ -149,6 +149,38 @@ final class MethodNameServiceTest extends TestCase
                 ['public private(set) string $id'],
                 null,
             ],
+            'attribute on a parameter' => [
+                'setPassword(#[\\SensitiveParameter] string $password): void',
+                'setPassword',
+                ['#[\\SensitiveParameter] string $password'],
+                'void',
+            ],
+
+            // PHPStan and Psalm type syntax, which carries braces and angle brackets of its own.
+            'shaped array return type' => [
+                'describe(int $uid): array{name: string, size: int}',
+                'describe',
+                ['int $uid'],
+                'array{name: string, size: int}',
+            ],
+            'shaped array nested in a generic return type' => [
+                'all(): array<int, array{name: string}>',
+                'all',
+                [],
+                'array<int, array{name: string}>',
+            ],
+            'shaped array in a union return type' => [
+                'first(): int|array{name: string}',
+                'first',
+                [],
+                'int|array{name: string}',
+            ],
+            'shaped array as a parameter type' => [
+                'store(array{name: string} $row): void',
+                'store',
+                ['array{name: string} $row'],
+                'void',
+            ],
         ];
     }
 
@@ -177,7 +209,24 @@ final class MethodNameServiceTest extends TestCase
             'only whitespace' => ['   '],
             'colon without a return type' => ['broken(string $id):'],
             'nothing but parentheses' => ['()'],
+            'variable instead of a method name' => ['$broken(int $a)'],
+            'string literal instead of a method name' => ['"broken"(int $a)'],
             'unbalanced brackets in a default' => ['broken(array $a = [1, 2): void'],
+
+            // A brace separated from the type by whitespace is not signature text.
+            'method body' => ['broken(int $a): string {}'],
+            'method body without a return type' => ['broken(int $a) {}'],
+            'brace detached from the return type' => ['broken(int $a): array {name: string}'],
+            'unbalanced brace in a shaped array return type' => ['broken(int $a): array{name: string'],
+
+            // A comment is not signature text either, and silently dropping one would hide
+            // whatever the author meant to say with it.
+            'trailing line comment' => ['broken(int $a): string // a comment'],
+            'trailing block comment' => ['broken(int $a): string /* a comment */'],
+            'trailing hash comment' => ['broken(int $a): string # a comment'],
+            'comment hiding a parameter' => ['broken(int $a /*, int $b */)'],
+            'comment after the parameter list' => ['broken(int $a) // a comment'],
+            'comment before the parameter list' => ['broken /* x */ (int $a)'],
         ];
     }
 
