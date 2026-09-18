@@ -20,11 +20,15 @@ use function strlen;
 use function token_get_all;
 use function trim;
 
+use const T_CLOSE_TAG;
 use const T_COMMENT;
 use const T_CONSTANT_ENCAPSED_STRING;
 use const T_DNUMBER;
 use const T_DOC_COMMENT;
+use const T_INLINE_HTML;
 use const T_LNUMBER;
+use const T_OPEN_TAG;
+use const T_OPEN_TAG_WITH_ECHO;
 use const T_VARIABLE;
 use const T_WHITESPACE;
 
@@ -50,10 +54,14 @@ class MethodNameService
      *
      * A label is not limited to ASCII — `fooBär()` is a method PHP accepts and a manual can
      * document — so the high range is part of the pattern, as it is in PHP's own grammar.
+     *
+     * The pattern is UTF-8 aware, which is what makes text that is not valid UTF-8 fail it:
+     * `preg_match` returns false there rather than 1. The anchor this name becomes is built by
+     * a slugger that throws on such a byte, so the signature has to be a warning here instead.
      */
     private function isIdentifier(string $text): bool
     {
-        return preg_match('/^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/', $text) === 1;
+        return preg_match('/^[A-Za-z_\x{80}-\x{10FFFF}][A-Za-z0-9_\x{80}-\x{10FFFF}]*$/u', $text) === 1;
     }
 
     /**
@@ -117,7 +125,7 @@ class MethodNameService
 
         // Every other word: a type name, qualified or not, and the keywords a type name lexes
         // into — `array`, `static`, `class`, or the `list` and `empty` inside `non-empty-list`.
-        return preg_match('/^\\\\?[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff\\\\]*$/', $text) === 1;
+        return preg_match('/^\\\\?[A-Za-z_\x{80}-\x{10FFFF}][A-Za-z0-9_\x{80}-\x{10FFFF}\\\\]*$/u', $text) === 1;
     }
 
     /**
@@ -182,7 +190,13 @@ class MethodNameService
 
             // A comment carries text the renderer would have to drop, and dropping it silently
             // is how a signature ends up rendered without the half its author hid behind `//`.
-            if (is_array($token) && ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT)) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                return null;
+            }
+
+            /* A closing tag ends the PHP the lexer was handed, so everything after it arrives
+               as one lump of inline HTML. Appending that lump renders a signature nobody wrote. */
+            if (is_array($token) && in_array($token[0], [T_INLINE_HTML, T_OPEN_TAG, T_OPEN_TAG_WITH_ECHO, T_CLOSE_TAG], true)) {
                 return null;
             }
 
