@@ -16,8 +16,8 @@ use function is_array;
 use function preg_match;
 use function sprintf;
 use function str_ends_with;
-use function strlen;
 use function strtolower;
+use function substr_count;
 use function token_get_all;
 use function trim;
 
@@ -66,14 +66,15 @@ class MethodNameService
      * Pops the generic brackets an angle-bracket token closes.
      *
      * `>>` ends two generics but lexes as one token, so `array<int, list<string>>` closes both
-     * of its brackets at once. Returns false when the brackets do not match, which leaves the
-     * caller to reject the signature rather than repair it.
+     * of its brackets at once, and PHP 8.5 lexes `|>` as one token where earlier versions lex
+     * two. Only the `>` in the text closes anything. Returns false when the brackets do not
+     * match, which leaves the caller to reject the signature rather than repair it.
      *
      * @param list<string> $closers
      */
     private function closeAngleBrackets(string $text, array &$closers): bool
     {
-        for ($count = strlen($text); $count > 0; $count--) {
+        for ($count = substr_count($text, '>'); $count > 0; $count--) {
             if (array_pop($closers) !== '>') {
                 return false;
             }
@@ -97,7 +98,7 @@ class MethodNameService
         $nested = $closer !== '';
 
         // `&` and `>>` reach this as named tokens, so operators are matched by text, not by id.
-        if (in_array($text, ['?', '|', '&', '-', '+', '(', ')', '[', ']', '{', '}', '<', '>', '>>'], true)) {
+        if (in_array($text, ['?', '|', '&', '-', '+', '(', ')', '[', ']', '{', '}', '<', '>', '>>', '|>'], true)) {
             return true;
         }
 
@@ -264,7 +265,7 @@ class MethodNameService
                     continue;
                 }
 
-                if ($text === '>' || $text === '>>') {
+                if (in_array($text, ['>', '>>', '|>'], true)) {
                     if (($closers[count($closers) - 1] ?? '') === '>') {
                         if (!$this->closeAngleBrackets($text, $closers)) {
                             return null;
@@ -380,11 +381,11 @@ class MethodNameService
                     return null;
                 }
 
-                if (($text === '>' || $text === '>>') && !$this->closeAngleBrackets($text, $closers)) {
+                if (in_array($text, ['>', '>>', '|>'], true) && !$this->closeAngleBrackets($text, $closers)) {
                     return null;
                 }
 
-                if ($text !== '>' && $text !== '>>') {
+                if (!in_array($text, ['>', '>>', '|>'], true)) {
                     if (isset($openers[$text])) {
                         $closers[] = $openers[$text];
                     } elseif (in_array($text, [')', ']', '}'], true) && array_pop($closers) !== $text) {
