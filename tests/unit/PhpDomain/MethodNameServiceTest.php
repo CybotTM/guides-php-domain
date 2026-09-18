@@ -369,7 +369,47 @@ final class MethodNameServiceTest extends TestCase
             'array shorthand on a shape' => ['all(): array{a: int}[]', 'all', [], 'array{a: int}[]'],
             'array shorthand on a generic' => ['all(): list<int>[]', 'all', [], 'list<int>[]'],
             'non-ASCII return type' => ['all(): Bär', 'all', [], 'Bär'],
-            'float as a shape key' => ['all(): array{1.5: int}', 'all', [], 'array{1.5: int}'],
+            'float literal return type' => ['all(): 1.5', 'all', [], '1.5'],
+
+            // A literal is a type of its own: a manual writes the set of values a method can
+            // return this way. Verified against phpstan/phpdoc-parser 2.3.5, which parses each
+            // of these as a type.
+            'integer literal return type' => ['all(): 5', 'all', [], '5'],
+            'string literal return type' => ["all(): 'foo'", 'all', [], "'foo'"],
+            'union of integer literals' => ['all(): 0|1', 'all', [], '0|1'],
+            'union of string literals' => ["all(): 'a'|'b'", 'all', [], "'a'|'b'"],
+            'literal in a union with a type' => ['all(): int|5', 'all', [], 'int|5'],
+
+            // A constant name may carry the `*` anywhere, and a generic argument may be one.
+            'class constant wildcard with a prefix' => [
+                'all(): Currency::CURRENCY_*',
+                'all',
+                [],
+                'Currency::CURRENCY_*',
+            ],
+            'nullable class constant wildcard' => [
+                'all(): ?Currency::CURRENCY_*',
+                'all',
+                [],
+                '?Currency::CURRENCY_*',
+            ],
+            'wildcard as a generic argument' => ['all(): Foo<Bar, *>', 'all', [], 'Foo<Bar, *>'],
+            'spaced class constant operator' => ['all(): Foo :: BAR', 'all', [], 'Foo :: BAR'],
+
+            // A callable marks an optional parameter with `=`, and a shape may quote a key that
+            // holds a `$`, which the lexer would otherwise read as interpolation.
+            'callable return type with an optional parameter' => [
+                'run(): callable(int=): void',
+                'run',
+                [],
+                'callable(int=): void',
+            ],
+            'quoted shape key holding a dollar sign' => [
+                'all(): array{"$ref": int}',
+                'all',
+                [],
+                'array{"$ref": int}',
+            ],
             'optional numeric shape key' => ['all(): array{0?: string}', 'all', [], 'array{0?: string}'],
             'negative bound in a range' => ['all(): int<-1, 1>', 'all', [], 'int<-1, 1>'],
             'callable return type with several parameters' => [
@@ -493,9 +533,8 @@ final class MethodNameServiceTest extends TestCase
             'return type ending in an intersection operator' => ['broken(): string&'],
             'return type that is only a question mark' => ['broken(): ?'],
 
-            // A value is not a type, outside an array shape where it is a key.
-            'number instead of a return type' => ['broken(): 5'],
-            'string literal instead of a return type' => ['broken(): "str"'],
+            // A variable is not a type, outside an array shape where it can be a key. `$this`
+            // is the one PHPStan means as a type, and it is in the valid provider.
             'variable instead of a return type' => ['broken(): $foo'],
 
             // An unterminated generic is the angle-bracket form of a truncated return type.
