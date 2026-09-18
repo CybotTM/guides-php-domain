@@ -152,6 +152,22 @@ final class MethodNameServiceTest extends TestCase
                 ['public private(set) string $id'],
                 null,
             ],
+
+            // PHP 8.4 lexes `private(set)` as one token and every version before it as four.
+            // It is not a return type under either reading, but it has to be the same answer on
+            // both, or a manual renders differently depending on the PHP its renderer runs.
+            'asymmetric visibility in the return type' => [
+                'get(): private(set)',
+                'get',
+                [],
+                'private(set)',
+            ],
+            'asymmetric visibility inside a shape' => [
+                'get(): array{a: protected(set)}',
+                'get',
+                [],
+                'array{a: protected(set)}',
+            ],
             'attribute on a parameter' => [
                 'setPassword(#[\\SensitiveParameter] string $password): void',
                 'setPassword',

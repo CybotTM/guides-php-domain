@@ -130,7 +130,12 @@ class MethodNameService
 
         // A parenthesised scalar lexes as a cast, so `callable(int): string` never reaches the
         // bracket stack as brackets. The token is balanced by construction and carries a type.
-        if (preg_match('/^\\(\\s*[A-Za-z]+\\s*\\)$/', $text) === 1) {
+        //
+        // A word in front of it is `private(set)`, which PHP 8.4 lexes as one token and every
+        // version before it as four. Neither reading is a return type, but accepting it on one
+        // version and warning on another would make a manual render differently depending on
+        // the PHP its renderer runs — the boundary this class avoids by not parsing at all.
+        if (preg_match('/^[A-Za-z_]*\\(\\s*[A-Za-z]+\\s*\\)$/', $text) === 1) {
             return true;
         }
 
