@@ -379,6 +379,10 @@ final class MethodNameServiceTest extends TestCase
             'union of integer literals' => ['all(): 0|1', 'all', [], '0|1'],
             'union of string literals' => ["all(): 'a'|'b'", 'all', [], "'a'|'b'"],
             'literal in a union with a type' => ['all(): int|5', 'all', [], 'int|5'],
+            'union of negative and positive literals' => ['all(): -1|0|1', 'all', [], '-1|0|1'],
+            'negative literal return type' => ['all(): -1', 'all', [], '-1'],
+            'negative float literal return type' => ['all(): -1.5', 'all', [], '-1.5'],
+            'nullable negative literal return type' => ['all(): ?-1', 'all', [], '?-1'],
 
             // A constant name may carry the `*` anywhere, and a generic argument may be one.
             'class constant wildcard with a prefix' => [
@@ -409,6 +413,12 @@ final class MethodNameServiceTest extends TestCase
                 'all',
                 [],
                 'array{"$ref": int}',
+            ],
+            'quoted string type holding a dollar sign' => [
+                'all(): list<"$ref">',
+                'all',
+                [],
+                'list<"$ref">',
             ],
             'optional numeric shape key' => ['all(): array{0?: string}', 'all', [], 'array{0?: string}'],
             'negative bound in a range' => ['all(): int<-1, 1>', 'all', [], 'int<-1, 1>'],
@@ -557,7 +567,6 @@ final class MethodNameServiceTest extends TestCase
 
             // Each operator that cannot open a type, and each that cannot end one.
             'intersection operator instead of a return type' => ['broken(): &string'],
-            'hyphen instead of a return type' => ['broken(): -string'],
             'square bracket instead of a return type' => ['broken(): [int]'],
             'angle bracket instead of a return type' => ['broken(): <int>'],
             'return type ending in a hyphen' => ['broken(): non-'],
@@ -570,6 +579,13 @@ final class MethodNameServiceTest extends TestCase
             'unbalanced generic inside a shaped parameter type' => ['store(array{a: list<int} $x)'],
             'unbalanced generic with a comma inside a shaped parameter type' => ['store(array{a: list<int, string} $x)'],
             'multiplication between two type names' => ['broken(): int*int'],
+            'multiplication after a class constant' => ['broken(): Foo::BAR|int*int'],
+            'multiplication inside a generic' => ['broken(): Foo<int*int>'],
+            'wildcard suffixed to a generic argument' => ['broken(): Foo<Bar*>'],
+            'wildcard after a shape' => ['broken(): array{a: Foo::BAR}*'],
+            'minus before a type name' => ['broken(): -string'],
+            'assignment inside a shape' => ['broken(): array{a=int}'],
+            'assignment inside a generic' => ['broken(): list<a=int>'],
 
             // A comma joins the keys of a shape, not two types; a colon needs a callable before it.
             'comma between two return types' => ['broken(): int,string'],
