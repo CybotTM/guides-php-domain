@@ -339,6 +339,14 @@ final class MethodNameServiceTest extends TestCase
             'unbalanced generic return type' => ['broken(): array<int, string'],
             'unbalanced generic parameter type' => ['broken(array<int, string $rows): void'],
             'shaped array return type closed by an angle bracket' => ['broken(): array{a: int>'],
+
+            // A closing tag hands the rest of the text to the lexer as inline HTML, which is
+            // not signature text. The anchor builder throws on a name that is not valid UTF-8,
+            // so that has to be a warning here rather than an aborted directive later.
+            'closing tag inside the parameter list' => ["broken(int \$a ?><b>x</b><?php )"],
+            'closing tag after the parameter list' => ["broken(int \$a) ?><b>x</b>"],
+            'method name that is not valid UTF-8' => ["broken\xFFname(int \$a)"],
+            'parameter type that is not valid UTF-8' => ["broken(): str\xFFing"],
         ];
     }
 
