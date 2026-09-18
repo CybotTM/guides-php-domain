@@ -99,10 +99,15 @@ class MethodNameService
             return true;
         }
 
-        // A shape separates its keys with a comma and names them with a colon, marks itself
-        // unsealed with `...` and may key on a class constant. None of that has a meaning
-        // outside the brackets, where a comma would announce a second type.
-        if ($nested && in_array($text, [',', ':', '...', '::'], true)) {
+        // `Foo::BAR` is a type PHPStan understands, in a shape key and on its own.
+        if ($text === '::') {
+            return true;
+        }
+
+        // A shape separates its keys with a comma and names them with a colon, and marks itself
+        // unsealed with `...`. Neither has a meaning outside the brackets, where a comma would
+        // announce a second type.
+        if ($nested && in_array($text, [',', ':', '...'], true)) {
             return true;
         }
 
@@ -227,7 +232,7 @@ class MethodNameService
                     $sawDefault = true;
                 }
 
-                if ($text === '<' && !$sawDefault && (count($closers) === 1 || ($closers[count($closers) - 1] ?? '') === '>')) {
+                if ($text === '<' && !$sawDefault && (count($closers) === 1 || in_array($closers[count($closers) - 1] ?? '', ['>', '}'], true))) {
                     $closers[] = '>';
                     $parameter .= $text;
                     continue;
@@ -243,9 +248,10 @@ class MethodNameService
                         continue;
                     }
 
-                    // Outside a generic the only `>` that belongs here is a comparison, which
-                    // can only stand in a default value.
-                    if (!$sawDefault) {
+                    // At the top level of the list the only `>` that belongs here is a
+                    // comparison, which can only stand in a default value. Deeper in, it is
+                    // inside an attribute argument or a default, where it is the author's.
+                    if (!$sawDefault && count($closers) === 1) {
                         return null;
                     }
                 }
@@ -301,7 +307,10 @@ class MethodNameService
                 // closed parameter list belongs to the type even at the top level.
                 $callableColon = $text === ':' && $closers === [] && str_ends_with($lastReturnToken, ')');
 
-                if (!$callableColon && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
+                // `Foo::*` names every constant of a class. A `*` anywhere else is arithmetic.
+                $constantWildcard = $text === '*' && $lastReturnToken === '::';
+
+                if (!$callableColon && !$constantWildcard && !$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
                     return null;
                 }
 
@@ -328,7 +337,7 @@ class MethodNameService
 
                 // A type opens with a name, a `?` or the parenthesis of a DNF type. A bracket
                 // or an operator in that position is not a type at all, as in `foo(): {}`.
-                if ($lastReturnToken === '' && in_array($text, ['|', '&', '-', ')', '[', ']', '{', '}', '<', '>'], true)) {
+                if ($lastReturnToken === '' && in_array($text, ['|', '&', '-', '::', ')', '[', ']', '{', '}', '<', '>'], true)) {
                     return null;
                 }
 
@@ -361,7 +370,7 @@ class MethodNameService
         // A colon announces a return type, so an empty one is a broken signature rather than none.
         // A type that ends on an operator is the same thing half written — `string|` names one
         // type and promises another, and rendering it is how a truncation looks on the page.
-        if ($state === 'return' && ($return === '' || in_array($lastReturnToken, ['?', '|', '&', '-', ':'], true))) {
+        if ($state === 'return' && ($return === '' || in_array($lastReturnToken, ['?', '|', '&', '-', ':', '::'], true))) {
             return null;
         }
 

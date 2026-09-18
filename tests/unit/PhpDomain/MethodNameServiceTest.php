@@ -305,13 +305,58 @@ final class MethodNameServiceTest extends TestCase
             ],
 
             // A comparison is only ever a default value, so it is not read as a generic. Inside
-            // an attribute argument it is not one either, whether or not a default came first.
+            // an attribute argument it is not one either, in either direction.
             'greater-than in a default value' => ['check(bool $b = 2 > 1)', 'check', ['bool $b = 2 > 1'], null],
-            'comparison inside an attribute' => [
+            'less-than inside an attribute' => [
                 'check(#[Attr(1 < 2)] int $a)',
                 'check',
                 ['#[Attr(1 < 2)] int $a'],
                 null,
+            ],
+            'greater-than inside an attribute' => [
+                'check(#[Attr(1 > 2)] int $a)',
+                'check',
+                ['#[Attr(1 > 2)] int $a'],
+                null,
+            ],
+
+            // A generic inside a shape, in the position where the type of a parameter is read
+            // rather than the return type.
+            'generic inside a shaped parameter type' => [
+                'store(array{a: list<int>} $x)',
+                'store',
+                ['array{a: list<int>} $x'],
+                null,
+            ],
+            'generic inside a nested shaped parameter type' => [
+                'store(array{a: array{b: list<int>}} $x)',
+                'store',
+                ['array{a: array{b: list<int>}} $x'],
+                null,
+            ],
+            'generic inside a callable parameter type' => [
+                'store(callable(array<int, string>): void $fn)',
+                'store',
+                ['callable(array<int, string>): void $fn'],
+                null,
+            ],
+
+            // A class constant is a type of its own, not only a shape key, and `Foo::*` names
+            // every constant of a class.
+            'class constant return type' => ['all(): Foo::BAR', 'all', [], 'Foo::BAR'],
+            'class constant return type on self' => ['all(): self::TYPE', 'all', [], 'self::TYPE'],
+            'union of class constants' => [
+                'all(): Foo::BAR|Foo::BAZ',
+                'all',
+                [],
+                'Foo::BAR|Foo::BAZ',
+            ],
+            'class constant wildcard return type' => ['all(): Foo::*', 'all', [], 'Foo::*'],
+            'class constant wildcard in a generic' => [
+                'all(): value-of<Foo::*>',
+                'all',
+                [],
+                'value-of<Foo::*>',
             ],
 
             // A trailing comma is legal since PHP 8.0 and announces no further parameter.
@@ -478,6 +523,14 @@ final class MethodNameServiceTest extends TestCase
             'angle bracket instead of a return type' => ['broken(): <int>'],
             'return type ending in a hyphen' => ['broken(): non-'],
             'return type ending in a callable colon' => ['broken(): callable():'],
+            'return type ending in a class constant operator' => ['broken(): Foo::'],
+            'class constant operator instead of a return type' => ['broken(): ::Foo'],
+            'multiplication instead of a return type' => ['broken(): int * 2'],
+            'multiplication attached to a return type' => ['broken(): int*2'],
+            'shaped parameter type closed by an angle bracket' => ['store(array{a: int> $x)'],
+            'unbalanced generic inside a shaped parameter type' => ['store(array{a: list<int} $x)'],
+            'unbalanced generic with a comma inside a shaped parameter type' => ['store(array{a: list<int, string} $x)'],
+            'multiplication between two type names' => ['broken(): int*int'],
 
             // A comma joins the keys of a shape, not two types; a colon needs a callable before it.
             'comma between two return types' => ['broken(): int,string'],
