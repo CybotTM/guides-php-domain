@@ -8,9 +8,12 @@ use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
 use Psr\Log\LoggerInterface;
 use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 
+use function array_merge;
 use function array_pop;
 use function array_slice;
+use function constant;
 use function count;
+use function defined;
 use function in_array;
 use function is_array;
 use function preg_match;
@@ -27,6 +30,7 @@ use const T_CONSTANT_ENCAPSED_STRING;
 use const T_DNUMBER;
 use const T_DOC_COMMENT;
 use const T_LNUMBER;
+use const T_STRING;
 use const T_VARIABLE;
 use const T_WHITESPACE;
 
@@ -63,44 +67,85 @@ class MethodNameService
     }
 
     /**
-     * Splits PHP 8.5's `|>` back into the tokens every earlier version produces.
+     * Rewrites the tokens PHP 8.5 merges into the several every earlier version produces.
      *
-     * 8.5 lexes `|>` as one token, so `|>=` arrives as `|>` and `=` where 8.4 lexes `|` and
-     * `>=`, and `|>>=` arrives as `|>` and `>=` where 8.4 lexes `|` and `>>=`. Re-joining the
-     * `>` with what follows reproduces the older stream exactly — 8.5 lexes `>`, `>=`, `>>`
-     * and `>>=` the way 8.4 does, so `|>` is the only token that has to be undone. The rest of
-     * this class then never sees a token that depends on the PHP rendering the documentation.
+     * 8.5 lexes `|>` as one token and `(void)` as a cast, and 8.4 lexes `private(set)` as one
+     * where 8.3 lexes four. The rest of this class then never sees a token that depends on the
+     * PHP rendering the documentation — the same boundary the lexer-only design avoids for
+     * syntax, applied to the lexer's own output. `MethodNameServiceTest` compares the stream
+     * this produces against a recorded one, so a token a later PHP merges fails a test rather
+     * than quietly changing what a manual renders.
+     *
+     * The `|>` case re-lexes rather than listing what may follow, because 8.4 munches maximally
+     * from that `>`: `|>=` was `>=`, `|>>=` was `>>=`, `|>==` was `>=` and `=`. Putting the `>`
+     * back in front of the remaining text and lexing it again reproduces that by construction.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      *
      * @return list<array{0: int, 1: string, 2: int}|string>
      */
-    private function splitPipeTokens(array $tokens): array
+    private function normaliseMergedTokens(array $tokens): array
     {
-        $rejoined = ['=' => '>=', '>' => '>>', '>=' => '>>='];
+        // The ids naming these tokens do not exist before 8.5, so they are looked up by name.
+        // Matching on the id rather than on the text keeps a `|>` inside a string or in the
+        // inline HTML after a closing tag out of it.
+        $pipe = defined('T_PIPE') ? constant('T_PIPE') : null;
+        $merged = [];
+
+        foreach (['T_VOID_CAST', 'T_PRIVATE_SET', 'T_PROTECTED_SET', 'T_PUBLIC_SET'] as $name) {
+            if (defined($name)) {
+                $merged[] = constant($name);
+            }
+        }
+
         $result = [];
         $total = count($tokens);
 
         for ($index = 0; $index < $total; $index++) {
             $token = $tokens[$index];
 
-            if ((is_array($token) ? $token[1] : $token) !== '|>') {
+            if (!is_array($token)) {
                 $result[] = $token;
                 continue;
             }
 
-            $result[] = '|';
+            if (in_array($token[0], $merged, true) && preg_match('/^([A-Za-z_]*)\\((\\s*)([A-Za-z]+)(\\s*)\\)$/', $token[1], $parts) === 1) {
+                if ($parts[1] !== '') {
+                    $result[] = [T_STRING, $parts[1], $token[2]];
+                }
 
-            $next = $tokens[$index + 1] ?? null;
-            $nextText = $next === null ? '' : (is_array($next) ? $next[1] : $next);
+                $result[] = '(';
 
-            if (isset($rejoined[$nextText])) {
-                $result[] = $rejoined[$nextText];
-                $index++;
+                if ($parts[2] !== '') {
+                    $result[] = [T_WHITESPACE, $parts[2], $token[2]];
+                }
+
+                $result[] = [T_STRING, $parts[3], $token[2]];
+
+                if ($parts[4] !== '') {
+                    $result[] = [T_WHITESPACE, $parts[4], $token[2]];
+                }
+
+                $result[] = ')';
                 continue;
             }
 
-            $result[] = '>';
+            if ($pipe !== null && $token[0] === $pipe) {
+                $rest = '>';
+
+                for ($ahead = $index + 1; $ahead < $total; $ahead++) {
+                    $rest .= is_array($tokens[$ahead]) ? $tokens[$ahead][1] : $tokens[$ahead];
+                }
+
+                $result[] = '|';
+
+                /** @var list<array{0: int, 1: string, 2: int}|string> $relexed */
+                $relexed = array_slice(@token_get_all('<?php ' . $rest), 1);
+
+                return array_merge($result, $this->normaliseMergedTokens($relexed));
+            }
+
+            $result[] = $token;
         }
 
         return $result;
@@ -176,12 +221,7 @@ class MethodNameService
 
         // A parenthesised scalar lexes as a cast, so `callable(int): string` never reaches the
         // bracket stack as brackets. The token is balanced by construction and carries a type.
-        //
-        // A word in front of it is `private(set)`, which PHP 8.4 lexes as one token and every
-        // version before it as four. Neither reading is a return type, but accepting it on one
-        // version and warning on another would make a manual render differently depending on
-        // the PHP its renderer runs — the boundary this class avoids by not parsing at all.
-        if (preg_match('/^[A-Za-z_]*\\(\\s*[A-Za-z]+\\s*\\)$/', $text) === 1) {
+        if (preg_match('/^\\(\\s*[A-Za-z]+\\s*\\)$/', $text) === 1) {
             return true;
         }
 
@@ -241,7 +281,7 @@ class MethodNameService
         // The opening tag and the `function` keyword this method prepended itself. Skipping
         // them by position rather than by text keeps `function()` — a legal method name that
         // lexes as a keyword — parsable, and keeps an author's own `function` a warning.
-        $tokens = $this->splitPipeTokens(array_slice($tokens, 2));
+        $tokens = $this->normaliseMergedTokens(array_slice($tokens, 2));
 
         /** @var array<string, string> $openers a bracket and the closer that has to match it */
         $openers = ['(' => ')', '[' => ']', '{' => '}', '#[' => ']', '<' => '>'];
