@@ -383,6 +383,8 @@ final class MethodNameServiceTest extends TestCase
             'negative literal return type' => ['all(): -1', 'all', [], '-1'],
             'negative float literal return type' => ['all(): -1.5', 'all', [], '-1.5'],
             'nullable negative literal return type' => ['all(): ?-1', 'all', [], '?-1'],
+            'positive literal return type' => ['all(): +1', 'all', [], '+1'],
+            'union carrying both signs' => ['all(): +1|0|-1', 'all', [], '+1|0|-1'],
 
             // A constant name may carry the `*` anywhere, and a generic argument may be one.
             'class constant wildcard with a prefix' => [
@@ -570,6 +572,7 @@ final class MethodNameServiceTest extends TestCase
             'square bracket instead of a return type' => ['broken(): [int]'],
             'angle bracket instead of a return type' => ['broken(): <int>'],
             'return type ending in a hyphen' => ['broken(): non-'],
+            'return type ending in a plus' => ['broken(): int+'],
             'return type ending in a callable colon' => ['broken(): callable():'],
             'return type ending in a class constant operator' => ['broken(): Foo::'],
             'class constant operator instead of a return type' => ['broken(): ::Foo'],
@@ -584,6 +587,8 @@ final class MethodNameServiceTest extends TestCase
             'wildcard suffixed to a generic argument' => ['broken(): Foo<Bar*>'],
             'wildcard after a shape' => ['broken(): array{a: Foo::BAR}*'],
             'minus before a type name' => ['broken(): -string'],
+            'plus before a type name' => ['broken(): +string'],
+            'sign with no literal after it' => ['broken(): -'],
             'assignment inside a shape' => ['broken(): array{a=int}'],
             'assignment inside a generic' => ['broken(): list<a=int>'],
 
