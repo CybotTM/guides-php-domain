@@ -149,7 +149,7 @@ class MethodNameService
                 while ($ahead < $total) {
                     $text = is_array($tokens[$ahead]) ? $tokens[$ahead][1] : $tokens[$ahead];
 
-                    if (preg_match('/^[=>]+$/', $text) !== 1) {
+                    if (preg_match('/^[=>]+$/D', $text) !== 1) {
                         break;
                     }
 

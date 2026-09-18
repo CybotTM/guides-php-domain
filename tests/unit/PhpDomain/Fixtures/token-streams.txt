@@ -172,3 +172,5 @@ n(): array{Foo::BAR: int}	[" ","n","(",")",":"," ","array","{","Foo","::","BAR",
 n(int $a // c	[" ","n","(","int"," ","$a"," ","// c"]	["whitespace","word","char","word","whitespace","variable","whitespace","comment"]
 n(int $a /* c */)	[" ","n","(","int"," ","$a"," ","/* c */",")"]	["whitespace","word","char","word","whitespace","variable","whitespace","comment","char"]
 n(int $a) ?>x	[" ","n","(","int"," ","$a",")"," ","?>","x"]	["whitespace","word","char","word","whitespace","variable","char","whitespace","close-tag","word"]
+#[A] n()	[" ","#[","A","]"," ","n","(",")"]	["whitespace","word","word","char","whitespace","word","char","char"]
+#[A(1)] n(int $a): void	[" ","#[","A","(","1",")","]"," ","n","(","int"," ","$a",")",":"," ","void"]	["whitespace","word","word","char","number","char","char","whitespace","word","char","word","whitespace","variable","char","char","whitespace","word"]
