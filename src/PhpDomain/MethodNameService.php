@@ -8,6 +8,10 @@ use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
 use Psr\Log\LoggerInterface;
 use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 
+use function array_pop;
+use function array_slice;
+use function count;
+use function in_array;
 use function is_array;
 use function preg_match;
 use function sprintf;
@@ -15,7 +19,11 @@ use function token_get_all;
 use function trim;
 
 use const T_COMMENT;
+use const T_CONSTANT_ENCAPSED_STRING;
+use const T_DNUMBER;
 use const T_DOC_COMMENT;
+use const T_LNUMBER;
+use const T_VARIABLE;
 use const T_WHITESPACE;
 
 class MethodNameService
@@ -35,10 +43,52 @@ class MethodNameService
         return new MethodNameNode($name, [], null);
     }
 
-    /** Whether the text is shaped like a PHP label, which is what a method name has to be. */
+    /**
+     * Whether the text is shaped like a PHP label, which is what a method name has to be.
+     *
+     * A label is not limited to ASCII — `fooBär()` is a method PHP accepts and a manual can
+     * document — so the high range is part of the pattern, as it is in PHP's own grammar.
+     */
     private function isIdentifier(string $text): bool
     {
-        return preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $text) === 1;
+        return preg_match('/^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/', $text) === 1;
+    }
+
+    /**
+     * Whether the token may appear in a return type.
+     *
+     * A return type is a closed vocabulary — type names, the operators joining them, and the
+     * brackets of PHPStan and Psalm syntax. Everything else is prose, punctuation or code that
+     * an author wrote after the signature, and accepting it renders that text as a type.
+     *
+     * @param int|null $id  the token id, null for a single-character token
+     * @param bool $nested  whether the token sits inside a bracket of the type
+     */
+    private function isReturnTypeToken(string $text, int|null $id, bool $nested): bool
+    {
+        // `&` reaches this as a named token, so the operators are matched by text, not by id.
+        if (in_array($text, ['?', '|', '&', '-', '(', ')', '[', ']', '{', '}', '<', '>'], true)) {
+            return true;
+        }
+
+        // A shaped array separates its keys with a comma and names them with a colon. Neither
+        // has a meaning outside the brackets, where a comma would announce a second type.
+        if ($nested && in_array($text, [',', ':'], true)) {
+            return true;
+        }
+
+        if ($id === null) {
+            return false;
+        }
+
+        if (in_array($id, [T_LNUMBER, T_DNUMBER, T_CONSTANT_ENCAPSED_STRING, T_VARIABLE], true)) {
+            // A shaped-array key, and `$this`, which is a type PHPStan understands.
+            return true;
+        }
+
+        // Every other word: a type name, qualified or not, and the keywords a type name lexes
+        // into — `array`, `static`, `class`, or the `list` and `empty` inside `non-empty-list`.
+        return preg_match('/^\\\\?[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff\\\\]*$/', $text) === 1;
     }
 
     /**
@@ -56,11 +106,18 @@ class MethodNameService
      * version boundary: the structure below is derived from parentheses and commas only.
      *
      * Nothing but the signature is lexed — no body is appended — so a return type carries its
-     * own braces and angle brackets, which PHPStan and Psalm array shapes are written with.
-     * Braces are therefore counted in the return type exactly as they are in the parameter
-     * list, under one rule: a brace separated from the type by whitespace is not signature
-     * text. `array{name: string}` is a type, `string {}` is a method body, and the second is
-     * rejected so the author is told rather than shown a return type that is missing its tail.
+     * own brackets, which PHPStan and Psalm array shapes and generics are written with. Two
+     * rules keep the text that follows the type out of it:
+     *
+     * - A token separated from the type by whitespace does not belong to it, unless it joins
+     *   two types (`string | int`) or follows the operator that does (`string|` `int`). That
+     *   rejects `string {}`, `array of Item` and `string -- returns the name`, and accepts
+     *   `array{name: string}`, whose brace hangs on the type.
+     * - A return type is a closed vocabulary, checked per token, so `void;`, `int, string` and
+     *   `string{ return $a; }` are rejected rather than rendered as types.
+     *
+     * Brackets are tracked by kind rather than by depth, in the parameter list as well, so
+     * `broken(int $a]` is a warning instead of a parameter list silently closed and repaired.
      *
      * @return array{name: string, params: list<string>, return: string|null}|null
      *         null when the text is not a method signature
@@ -70,15 +127,24 @@ class MethodNameService
         /** @var list<array{0: int, 1: string, 2: int}|string> $tokens */
         $tokens = @token_get_all('<?php function ' . $signature);
 
+        // The opening tag and the `function` keyword this method prepended itself. Skipping
+        // them by position rather than by text keeps `function()` — a legal method name that
+        // lexes as a keyword — parsable, and keeps an author's own `function` a warning.
+        $tokens = array_slice($tokens, 2);
+
+        /** @var array<string, string> $openers a bracket and the closer that has to match it */
+        $openers = ['(' => ')', '[' => ']', '{' => '}', '#[' => ']', '<' => '>'];
+
         $name = '';
         $nameTokens = 0;
         $params = [];
         $parameter = '';
         $return = '';
-        $depth = 0;
+        /** @var list<string> $closers the closers still owed, innermost last */
+        $closers = [];
         $state = 'name';
-        $closed = false;
         $afterWhitespace = false;
+        $lastReturnToken = '';
 
         foreach ($tokens as $token) {
             $text = is_array($token) ? $token[1] : $token;
@@ -94,14 +160,13 @@ class MethodNameService
             $afterWhitespace = $isWhitespace;
 
             if ($state === 'name') {
-                // The opening tag and the `function` keyword this method added itself.
-                if ($text === '<?php ' || $text === 'function' || $isWhitespace) {
+                if ($isWhitespace) {
                     continue;
                 }
 
                 if ($text === '(') {
                     $state = 'params';
-                    $depth = 1;
+                    $closers[] = ')';
                     continue;
                 }
 
@@ -111,22 +176,24 @@ class MethodNameService
             }
 
             if ($state === 'params') {
-                // `#[` is one token, and the `]` closing an attribute is a separate one.
-                if ($text === '(' || $text === '[' || $text === '{' || $text === '#[') {
-                    $depth++;
-                } elseif ($text === ')' || $text === ']' || $text === '}') {
-                    $depth--;
+                // `#[` is one token, and the `]` closing an attribute is a separate one. An
+                // angle bracket is not a bracket here: `<` is a comparison in a default value.
+                if ($text !== '<' && isset($openers[$text])) {
+                    $closers[] = $openers[$text];
+                } elseif (in_array($text, [')', ']', '}'], true)) {
+                    if (array_pop($closers) !== $text) {
+                        return null;
+                    }
 
-                    if ($depth === 0) {
+                    if ($closers === []) {
                         if (trim($parameter) !== '') {
                             $params[] = trim($parameter);
                         }
 
                         $state = 'closed';
-                        $closed = true;
                         continue;
                     }
-                } elseif ($text === ',' && $depth === 1) {
+                } elseif ($text === ',' && count($closers) === 1) {
                     $params[] = trim($parameter);
                     $parameter = '';
                     continue;
@@ -151,21 +218,41 @@ class MethodNameService
             }
 
             if ($state === 'return') {
-                if ($text === '(' || $text === '[' || $text === '{') {
-                    // A brace the type does not hang on opens a body, not an array shape.
-                    if ($text === '{' && $depth === 0 && $wasAfterWhitespace) {
-                        return null;
-                    }
-
-                    $depth++;
-                } elseif ($text === ')' || $text === ']' || $text === '}') {
-                    $depth--;
-
-                    if ($depth < 0) {
-                        return null;
-                    }
+                if ($isWhitespace) {
+                    $return .= $text;
+                    continue;
                 }
 
+                if (!$this->isReturnTypeToken($text, is_array($token) ? $token[0] : null, $closers !== [])) {
+                    return null;
+                }
+
+                // Whitespace ends the type unless what follows joins two types, or the type
+                // ended on the operator that does. `string {}` and `array of Item` stop here;
+                // `string | int` and `array{name: string}` do not.
+                if (
+                    $closers === []
+                    && $wasAfterWhitespace
+                    && $lastReturnToken !== ''
+                    && !in_array($text, ['|', '&'], true)
+                    && !in_array($lastReturnToken, ['|', '&'], true)
+                ) {
+                    return null;
+                }
+
+                // A type opens with a name, a `?` or the parenthesis of a DNF type. A bracket
+                // or an operator in that position is not a type at all, as in `foo(): {}`.
+                if ($lastReturnToken === '' && in_array($text, ['|', '&', '-', ')', '[', ']', '{', '}', '<', '>'], true)) {
+                    return null;
+                }
+
+                if (isset($openers[$text])) {
+                    $closers[] = $openers[$text];
+                } elseif (in_array($text, [')', ']', '}', '>'], true) && array_pop($closers) !== $text) {
+                    return null;
+                }
+
+                $lastReturnToken = $text;
                 $return .= $text;
             }
         }
@@ -175,7 +262,7 @@ class MethodNameService
 
         // Exactly one token, and it has to read like a name. A keyword is allowed: `list()` and
         // `print()` are legal method names and occur in the documentation.
-        if (!$closed || $depth !== 0 || $nameTokens !== 1 || !$this->isIdentifier($name)) {
+        if ($state === 'name' || $state === 'params' || $closers !== [] || $nameTokens !== 1 || !$this->isIdentifier($name)) {
             return null;
         }
 

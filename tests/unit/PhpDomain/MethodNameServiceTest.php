@@ -17,8 +17,11 @@ use Stringable;
 use T3Docs\GuidesPhpDomain\PhpDomain\MethodNameService;
 
 use function file;
+use function implode;
 use function preg_match;
+use function preg_replace;
 use function sprintf;
+use function trim;
 
 use const FILE_IGNORE_NEW_LINES;
 use const FILE_SKIP_EMPTY_LINES;
@@ -181,6 +184,38 @@ final class MethodNameServiceTest extends TestCase
                 ['array{name: string} $row'],
                 'void',
             ],
+            'empty shaped array return type' => ['nothing(): array{}', 'nothing', [], 'array{}'],
+            'integer range return type' => ['percent(): int<0, 100>', 'percent', [], 'int<0, 100>'],
+            'hyphenated PHPStan return type' => [
+                'rows(): non-empty-list<Foo>',
+                'rows',
+                [],
+                'non-empty-list<Foo>',
+            ],
+            'class string return type' => ['type(): class-string<Foo>', 'type', [], 'class-string<Foo>'],
+            'string key in a shaped array return type' => [
+                'row(): array{0: string, "key": int}',
+                'row',
+                [],
+                'array{0: string, "key": int}',
+            ],
+            'this return type' => ['self(): $this', 'self', [], '$this'],
+            'DNF return type' => ['get(): (A&B)|null', 'get', [], '(A&B)|null'],
+
+            // A space around `|` or `&` joins two types and is legal PHP.
+            'spaced union return type' => ['get(): string | int', 'get', [], 'string | int'],
+            'spaced intersection return type' => [
+                'all(): Countable & Traversable',
+                'all',
+                [],
+                'Countable & Traversable',
+            ],
+
+            // `function` is a legal method name and lexes as a keyword like `list` and `print`.
+            'method named function' => ['function(int $a)', 'function', ['int $a'], null],
+
+            // A PHP label is not limited to ASCII, and neither is a method name in a manual.
+            'non-ASCII method name' => ['fooBär(int $a): string', 'fooBär', ['int $a'], 'string'],
         ];
     }
 
@@ -227,6 +262,33 @@ final class MethodNameServiceTest extends TestCase
             'comment hiding a parameter' => ['broken(int $a /*, int $b */)'],
             'comment after the parameter list' => ['broken(int $a) // a comment'],
             'comment before the parameter list' => ['broken /* x */ (int $a)'],
+
+            // A bracket is closed by its own kind, so a mismatched one is not silently repaired.
+            'parameter list closed by a square bracket' => ['broken(int $a]'],
+            'parameter list closed by a brace' => ['broken(int $a}'],
+            'square bracket closed by a parenthesis in a default' => ['broken(array $a = [1, 2)): void'],
+            'shaped array return type closed by a square bracket' => ['broken(int $a): array{name: string]'],
+            'unbalanced angle bracket in a return type' => ['broken(): array<int, string'],
+            'return type closing a bracket it never opened' => ['broken(): string)('],
+
+            // Prose, punctuation and a second type after the return type are not return types.
+            'sentence after the return type' => ['broken(): string This method renders the page.'],
+            'word after the return type' => ['broken(): array of Item'],
+            'dashes after the return type' => ['broken(int $a): string -- returns the name'],
+            'semicolon after the return type' => ['broken(): void;'],
+            'comma separated return types' => ['broken(): int, string'],
+            'arrow body' => ['broken(int $a): int => $a * 2'],
+            'closing tag after the return type' => ['broken(): string ?> junk'],
+            'attached method body' => ['broken(int $a): string{ return $a; }'],
+
+            // The `function` keyword this parser prepends itself is skipped by position, so a
+            // second one is the author's text and does not belong to a signature.
+            'function keyword before the name' => ['function broken(int $a)'],
+            'function keyword after the name' => ['broken function (int $a)'],
+            'two words as a name' => ['broken name(int $a)'],
+            'nothing but a comma' => ['broken(,)'],
+            'bracket instead of a return type' => ['broken():{}'],
+            'operator instead of a return type' => ['broken(): |string'],
         ];
     }
 
@@ -247,6 +309,29 @@ final class MethodNameServiceTest extends TestCase
             preg_match('/^\w+$/', $node->getName()),
             sprintf('"%s" yields the method name alone, not the whole signature', $signature),
         );
+
+        // Asserting the name alone would pass a silently truncated return type or a dropped
+        // parameter, which is the defect class this parser exists to prevent. Reassembling the
+        // three parts pins all of them without an expectation hand-written per signature.
+        $return = $node->getReturn();
+        $reassembled = $node->getName()
+            . '(' . implode(', ', $node->getParams()) . ')'
+            . ($return === null ? '' : ': ' . $return);
+
+        self::assertSame(
+            self::collapseWhitespace($signature),
+            self::collapseWhitespace($reassembled),
+            sprintf('"%s" must survive the split without losing text', $signature),
+        );
+    }
+
+    /** Spacing is the parser's to normalise; the text it keeps is not. */
+    private static function collapseWhitespace(string $text): string
+    {
+        $collapsed = preg_replace('/\s*([(),:])\s*/', '$1', trim($text));
+        self::assertIsString($collapsed);
+
+        return (string) preg_replace('/\s+/', ' ', $collapsed);
     }
 
     /**
@@ -255,6 +340,8 @@ final class MethodNameServiceTest extends TestCase
     public static function realWorldSignatureProvider(): array
     {
         $lines = file(__DIR__ . '/Fixtures/real-world-signatures.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        // Narrows away the `false` that `file()` returns on a missing fixture. PHPUnit already
+        // fails the provider without this, but PHPStan does not accept the `foreach` without it.
         self::assertIsArray($lines);
 
         $cases = [];
