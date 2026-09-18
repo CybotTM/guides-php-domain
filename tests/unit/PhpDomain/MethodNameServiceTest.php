@@ -11,20 +11,28 @@ use phpDocumentor\Guides\RestructuredText\Parser\DocumentParserContext;
 use phpDocumentor\Guides\RestructuredText\TextRoles\TextRoleFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use Psr\Log\AbstractLogger;
 use Psr\Log\LoggerInterface;
 use Stringable;
 use T3Docs\GuidesPhpDomain\PhpDomain\MethodNameService;
 
+use function array_slice;
+use function explode;
 use function file;
 use function implode;
+use function is_array;
+use function json_decode;
 use function preg_match;
 use function preg_replace;
 use function sprintf;
+use function str_starts_with;
+use function token_get_all;
 use function trim;
 
 use const FILE_IGNORE_NEW_LINES;
 use const FILE_SKIP_EMPTY_LINES;
+use const PHP_VERSION;
 
 final class MethodNameServiceTest extends TestCase
 {
@@ -697,6 +705,60 @@ final class MethodNameServiceTest extends TestCase
         $cases = [];
         foreach ($lines as $line) {
             $cases[$line] = [$line];
+        }
+
+        return $cases;
+    }
+
+    /**
+     * The tokens a signature lexes into must not depend on the PHP rendering the documentation.
+     *
+     * PHP merges tokens between versions — 8.4 `private(set)`, 8.5 `|>` and `(void)` — and each
+     * time it did, a signature started rendering on one version and warning on another.
+     * `normaliseMergedTokens()` undoes them; this pins the result against a stream recorded on
+     * 8.1, where none of them are merged, so the next merge fails here instead.
+     *
+     * @param list<string> $expectedTokens
+     */
+    #[DataProvider('tokenStreamProvider')]
+    public function testMergedTokensAreUndone(string $signature, array $expectedTokens): void
+    {
+        $method = new ReflectionMethod($this->service, 'normaliseMergedTokens');
+        $tokens = $method->invoke($this->service, array_slice(@token_get_all('<?php function ' . $signature), 2));
+        self::assertIsArray($tokens);
+
+        $texts = [];
+        foreach ($tokens as $token) {
+            $texts[] = is_array($token) ? $token[1] : $token;
+        }
+
+        self::assertSame(
+            $expectedTokens,
+            $texts,
+            sprintf('"%s" lexes differently on PHP %s than it did on 8.1', $signature, PHP_VERSION),
+        );
+    }
+
+    /**
+     * @return array<string, array{string, list<string>}>
+     */
+    public static function tokenStreamProvider(): array
+    {
+        $lines = file(__DIR__ . '/Fixtures/token-streams.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($lines);
+
+        $cases = [];
+        foreach ($lines as $line) {
+            if (str_starts_with($line, '#')) {
+                continue;
+            }
+
+            [$signature, $json] = explode("\t", $line, 2);
+            $tokens = json_decode($json, true);
+            self::assertIsArray($tokens);
+
+            /** @var list<string> $tokens */
+            $cases[$signature] = [$signature, $tokens];
         }
 
         return $cases;
