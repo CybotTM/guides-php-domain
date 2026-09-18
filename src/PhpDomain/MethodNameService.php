@@ -17,6 +17,7 @@ use function preg_match;
 use function sprintf;
 use function str_ends_with;
 use function strlen;
+use function strtolower;
 use function token_get_all;
 use function trim;
 
@@ -101,9 +102,10 @@ class MethodNameService
             return true;
         }
 
-        // A shaped array separates its keys with a comma and names them with a colon. Neither
-        // has a meaning outside the brackets, where a comma would announce a second type.
-        if ($nested && in_array($text, [',', ':'], true)) {
+        // A shape separates its keys with a comma and names them with a colon, marks itself
+        // unsealed with `...` and may key on a class constant. None of that has a meaning
+        // outside the brackets, where a comma would announce a second type.
+        if ($nested && in_array($text, [',', ':', '...', '::'], true)) {
             return true;
         }
 
@@ -227,19 +229,27 @@ class MethodNameService
                     $sawDefault = true;
                 }
 
-                if ($text === '<' && !$sawDefault) {
+                if ($text === '<' && !$sawDefault && (count($closers) === 1 || ($closers[count($closers) - 1] ?? '') === '>')) {
                     $closers[] = '>';
                     $parameter .= $text;
                     continue;
                 }
 
-                if (($text === '>' || $text === '>>') && ($closers[count($closers) - 1] ?? '') === '>') {
-                    if (!$this->closeAngleBrackets($text, $closers)) {
-                        return null;
+                if ($text === '>' || $text === '>>') {
+                    if (($closers[count($closers) - 1] ?? '') === '>') {
+                        if (!$this->closeAngleBrackets($text, $closers)) {
+                            return null;
+                        }
+
+                        $parameter .= $text;
+                        continue;
                     }
 
-                    $parameter .= $text;
-                    continue;
+                    // Outside a generic the only `>` that belongs here is a comparison, which
+                    // can only stand in a default value.
+                    if (!$sawDefault) {
+                        return null;
+                    }
                 }
 
                 // `#[` is one token, and the `]` closing an attribute is a separate one.
@@ -306,7 +316,15 @@ class MethodNameService
                     && $lastReturnToken !== ''
                     && !in_array($text, ['|', '&'], true)
                     && !in_array($lastReturnToken, ['|', '&', '?', ':'], true)
+                    && !$callableColon
                 ) {
+                    return null;
+                }
+
+                // Only `array`, `list` and `object` carry a shape, so a brace after any other
+                // type is a method body written without the space that would have stopped it.
+                // `non-empty-list{int}` and `non-empty-array{a: int}` end on those same tokens.
+                if ($text === '{' && !in_array(strtolower($lastReturnToken), ['array', 'list', 'object'], true)) {
                     return null;
                 }
 
@@ -350,7 +368,9 @@ class MethodNameService
         }
 
         foreach ($params as $parameter) {
-            if (trim($parameter) === '') {
+            // An empty parameter, and text the anchor builder downstream cannot encode. The
+            // name and the return type are checked by their own patterns; this is the rest.
+            if (trim($parameter) === '' || preg_match('//u', $parameter) !== 1) {
                 return null;
             }
         }

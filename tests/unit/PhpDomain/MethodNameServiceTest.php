@@ -251,6 +251,71 @@ final class MethodNameServiceTest extends TestCase
                 'callable(): void',
             ],
             'nullable return type written with a space' => ['get(): ? string', 'get', [], '? string'],
+            'callable return type with a spaced colon' => [
+                'run(): callable(int) : string',
+                'run',
+                [],
+                'callable(int) : string',
+            ],
+
+            // Every shape syntax PHPStan documents. `non-empty-list` and `non-empty-array` end
+            // on the same token as `list` and `array`, which is what carries the shape.
+            'list shape return type' => ['all(): list{int, string}', 'all', [], 'list{int, string}'],
+            'object shape return type' => [
+                'all(): object{foo: int}',
+                'all',
+                [],
+                'object{foo: int}',
+            ],
+            'non-empty shape return type' => [
+                'all(): non-empty-list{int, string}',
+                'all',
+                [],
+                'non-empty-list{int, string}',
+            ],
+            'unsealed shape return type' => [
+                'all(): array{foo: int, ...}',
+                'all',
+                [],
+                'array{foo: int, ...}',
+            ],
+            'unsealed shape with typed extra keys' => [
+                'all(): array{foo: int, ...<string, int>}',
+                'all',
+                [],
+                'array{foo: int, ...<string, int>}',
+            ],
+            'class constant as a shape key' => [
+                'all(): array{Foo::BAR: int}',
+                'all',
+                [],
+                'array{Foo::BAR: int}',
+            ],
+            'optional shape key' => [
+                'all(): array{foo: int, bar?: string}',
+                'all',
+                [],
+                'array{foo: int, bar?: string}',
+            ],
+            'object shape intersected with a class' => [
+                'all(): object{foo: int}&\\stdClass',
+                'all',
+                [],
+                'object{foo: int}&\\stdClass',
+            ],
+
+            // A comparison is only ever a default value, so it is not read as a generic. Inside
+            // an attribute argument it is not one either, whether or not a default came first.
+            'greater-than in a default value' => ['check(bool $b = 2 > 1)', 'check', ['bool $b = 2 > 1'], null],
+            'comparison inside an attribute' => [
+                'check(#[Attr(1 < 2)] int $a)',
+                'check',
+                ['#[Attr(1 < 2)] int $a'],
+                null,
+            ],
+
+            // A trailing comma is legal since PHP 8.0 and announces no further parameter.
+            'trailing comma in the parameter list' => ['write(string $part,)', 'write', ['string $part'], null],
         ];
     }
 
@@ -301,9 +366,9 @@ final class MethodNameServiceTest extends TestCase
             // A bracket is closed by its own kind, so a mismatched one is not silently repaired.
             'parameter list closed by a square bracket' => ['broken(int $a]'],
             'parameter list closed by a brace' => ['broken(int $a}'],
+            'stray angle bracket in the parameter list' => ['broken(int $a>): void'],
             'square bracket closed by a parenthesis in a default' => ['broken(array $a = [1, 2)): void'],
             'shaped array return type closed by a square bracket' => ['broken(int $a): array{name: string]'],
-            'unbalanced angle bracket in a return type' => ['broken(): array<int, string'],
             'return type closing a bracket it never opened' => ['broken(): string)('],
 
             // Prose, punctuation and a second type after the return type are not return types.
@@ -315,6 +380,9 @@ final class MethodNameServiceTest extends TestCase
             'arrow body' => ['broken(int $a): int => $a * 2'],
             'closing tag after the return type' => ['broken(): string ?> junk'],
             'attached method body' => ['broken(int $a): string{ return $a; }'],
+            'attached empty method body' => ['broken(int $a): string{}'],
+            'attached body that reads like a shape' => ['broken(int $a): string{a}'],
+            'attached body inside a generic' => ['broken(): array<int, string{}>'],
 
             // The `function` keyword this parser prepends itself is skipped by position, so a
             // second one is the author's text and does not belong to a signature.
@@ -346,7 +414,9 @@ final class MethodNameServiceTest extends TestCase
             'closing tag inside the parameter list' => ["broken(int \$a ?><b>x</b><?php )"],
             'closing tag after the parameter list' => ["broken(int \$a) ?><b>x</b>"],
             'method name that is not valid UTF-8' => ["broken\xFFname(int \$a)"],
-            'parameter type that is not valid UTF-8' => ["broken(): str\xFFing"],
+            'return type that is not valid UTF-8' => ["broken(): str\xFFing"],
+            'parameter type that is not valid UTF-8' => ["broken(str\xFFing \$a)"],
+            'parameter name that is not valid UTF-8' => ["broken(int \$a\xFF)"],
         ];
     }
 
@@ -364,7 +434,7 @@ final class MethodNameServiceTest extends TestCase
         self::assertSame([], $this->warnings(), sprintf('"%s" must parse', $signature));
         self::assertSame(
             1,
-            preg_match('/^\w+$/', $node->getName()),
+            preg_match('/^\w+$/u', $node->getName()),
             sprintf('"%s" yields the method name alone, not the whole signature', $signature),
         );
 
