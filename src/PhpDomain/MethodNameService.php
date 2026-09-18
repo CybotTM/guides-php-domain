@@ -97,7 +97,7 @@ class MethodNameService
         $nested = $closer !== '';
 
         // `&` and `>>` reach this as named tokens, so operators are matched by text, not by id.
-        if (in_array($text, ['?', '|', '&', '-', '(', ')', '[', ']', '{', '}', '<', '>', '>>'], true)) {
+        if (in_array($text, ['?', '|', '&', '-', '+', '(', ')', '[', ']', '{', '}', '<', '>', '>>'], true)) {
             return true;
         }
 
@@ -363,12 +363,13 @@ class MethodNameService
                 }
 
                 // A type opens with a name, a `?`, the parenthesis of a DNF type, a literal, or
-                // the minus sign of a negative one — `-1|0|1` is a set a manual returns.
+                // the sign of one — `-1|0|1` is a set a manual returns, and a `+` is the same
+                // sign written out. A sign in front of anything else is not a type.
                 if ($pendingSign && !in_array(is_array($token) ? $token[0] : null, [T_LNUMBER, T_DNUMBER], true)) {
                     return null;
                 }
 
-                $pendingSign = $lastReturnToken === '' && $text === '-';
+                $pendingSign = $lastReturnToken === '' && in_array($text, ['-', '+'], true);
 
                 if ($lastReturnToken === '' && in_array($text, ['|', '&', '::', ')', '[', ']', '{', '}', '<', '>'], true)) {
                     return null;
@@ -406,7 +407,7 @@ class MethodNameService
         // A colon announces a return type, so an empty one is a broken signature rather than none.
         // A type that ends on an operator is the same thing half written — `string|` names one
         // type and promises another, and rendering it is how a truncation looks on the page.
-        if ($state === 'return' && ($return === '' || in_array($lastReturnToken, ['?', '|', '&', '-', ':', '::'], true))) {
+        if ($state === 'return' && ($return === '' || in_array($lastReturnToken, ['?', '|', '&', '-', '+', ':', '::'], true))) {
             return null;
         }
 
