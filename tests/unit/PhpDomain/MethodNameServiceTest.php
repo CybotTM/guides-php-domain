@@ -216,6 +216,41 @@ final class MethodNameServiceTest extends TestCase
 
             // A PHP label is not limited to ASCII, and neither is a method name in a manual.
             'non-ASCII method name' => ['fooBär(int $a): string', 'fooBär', ['int $a'], 'string'],
+
+            // The comma of a generic parameter type does not separate two parameters.
+            'generic parameter type' => [
+                'store(array<int, string> $rows): void',
+                'store',
+                ['array<int, string> $rows'],
+                'void',
+            ],
+            'nested generic parameter type' => [
+                'store(array<string, array<int, Foo>> $rows, int $page): void',
+                'store',
+                ['array<string, array<int, Foo>> $rows', 'int $page'],
+                'void',
+            ],
+            'comparison in a default value' => ['check(bool $b = 1 < 2)', 'check', ['bool $b = 1 < 2'], null],
+
+            // `>>` closes two generics but lexes as one token.
+            'nested generic return type' => [
+                'all(): array<int, array<string, int>>',
+                'all',
+                [],
+                'array<int, array<string, int>>',
+            ],
+
+            // A callable type names its own parameters and return type. `(int)` lexes as a cast,
+            // so it never reaches the parser as a pair of brackets.
+            'callable return type' => ['run(): callable(int): string', 'run', [], 'callable(int): string'],
+            'closure return type' => ['run(): Closure(int): void', 'run', [], 'Closure(int): void'],
+            'callable return type without parameters' => [
+                'run(): callable(): void',
+                'run',
+                [],
+                'callable(): void',
+            ],
+            'nullable return type written with a space' => ['get(): ? string', 'get', [], '? string'],
         ];
     }
 
@@ -289,6 +324,21 @@ final class MethodNameServiceTest extends TestCase
             'nothing but a comma' => ['broken(,)'],
             'bracket instead of a return type' => ['broken():{}'],
             'operator instead of a return type' => ['broken(): |string'],
+
+            // A type that ends on an operator names one type and promises another.
+            'return type ending in a union operator' => ['broken(): string|'],
+            'return type ending in an intersection operator' => ['broken(): string&'],
+            'return type that is only a question mark' => ['broken(): ?'],
+
+            // A value is not a type, outside an array shape where it is a key.
+            'number instead of a return type' => ['broken(): 5'],
+            'string literal instead of a return type' => ['broken(): "str"'],
+            'variable instead of a return type' => ['broken(): $foo'],
+
+            // An unterminated generic is the angle-bracket form of a truncated return type.
+            'unbalanced generic return type' => ['broken(): array<int, string'],
+            'unbalanced generic parameter type' => ['broken(array<int, string $rows): void'],
+            'shaped array return type closed by an angle bracket' => ['broken(): array{a: int>'],
         ];
     }
 
