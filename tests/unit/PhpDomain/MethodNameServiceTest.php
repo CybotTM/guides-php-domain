@@ -17,22 +17,36 @@ use Psr\Log\LoggerInterface;
 use Stringable;
 use T3Docs\GuidesPhpDomain\PhpDomain\MethodNameService;
 
+use function array_diff;
+use function array_filter;
+use function array_keys;
 use function array_slice;
+use function array_values;
 use function explode;
 use function file;
 use function implode;
 use function is_array;
 use function json_decode;
+use function str_starts_with;
 use function preg_match;
 use function preg_replace;
+use function get_defined_constants;
+use function sort;
 use function sprintf;
-use function str_starts_with;
 use function token_get_all;
 use function trim;
 
 use const FILE_IGNORE_NEW_LINES;
 use const FILE_SKIP_EMPTY_LINES;
 use const PHP_VERSION;
+use const T_CLOSE_TAG;
+use const T_COMMENT;
+use const T_CONSTANT_ENCAPSED_STRING;
+use const T_DNUMBER;
+use const T_DOC_COMMENT;
+use const T_LNUMBER;
+use const T_VARIABLE;
+use const T_WHITESPACE;
 
 final class MethodNameServiceTest extends TestCase
 {
@@ -719,28 +733,93 @@ final class MethodNameServiceTest extends TestCase
      * 8.1, where none of them are merged, so the next merge fails here instead.
      *
      * @param list<string> $expectedTokens
+     * @param list<string> $expectedClasses
      */
     #[DataProvider('tokenStreamProvider')]
-    public function testMergedTokensAreUndone(string $signature, array $expectedTokens): void
+    public function testMergedTokensAreUndone(string $signature, array $expectedTokens, array $expectedClasses): void
     {
         $method = new ReflectionMethod($this->service, 'normaliseMergedTokens');
         $tokens = $method->invoke($this->service, array_slice(@token_get_all('<?php function ' . $signature), 2));
         self::assertIsArray($tokens);
 
         $texts = [];
+        $classes = [];
         foreach ($tokens as $token) {
             $texts[] = is_array($token) ? $token[1] : $token;
+            $classes[] = self::tokenClass($token);
         }
 
+        $where = sprintf('"%s" lexes differently on PHP %s than it did on 8.1', $signature, PHP_VERSION);
+        self::assertSame($expectedTokens, $texts, $where);
+        self::assertSame($expectedClasses, $classes, $where);
+    }
+
+    /**
+     * A token kind this parser has never seen must not reach it unexamined.
+     *
+     * Every defect this class has had across PHP versions came from the same place: a version
+     * added a token kind that merged text earlier versions lexed apart, and a signature started
+     * rendering on one version and warning on another. Three were found one at a time. This
+     * pins the set itself, so the next one fails here — on the CI matrix, the first time a new
+     * version is added to it — rather than in somebody's manual.
+     *
+     * A name appearing here is not a defect. It means someone has to check whether the token
+     * merges text, and if it does, add it to `normaliseMergedTokens()` and to
+     * `token-streams.txt`; if it does not, add it to this list with a note.
+     */
+    public function testNoUnexaminedTokenKindExists(): void
+    {
+        $constants = get_defined_constants(true);
+        self::assertArrayHasKey('tokenizer', $constants);
+
+        $known = file(__DIR__ . '/Fixtures/token-kinds.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($known);
+
+        $known = array_values(array_filter($known, static fn(string $line): bool => !str_starts_with($line, '#')));
+        $found = array_keys($constants['tokenizer']);
+        sort($found);
+        sort($known);
+
         self::assertSame(
-            $expectedTokens,
-            $texts,
-            sprintf('"%s" lexes differently on PHP %s than it did on 8.1', $signature, PHP_VERSION),
+            [],
+            array_values(array_diff($found, $known)),
+            sprintf(
+                'PHP %s defines a token kind this parser has not been checked against. '
+                . 'If it merges text an earlier version lexes apart, handle it in '
+                . 'normaliseMergedTokens(); otherwise add it to Fixtures/token-kinds.txt.',
+                PHP_VERSION,
+            ),
         );
     }
 
     /**
-     * @return array<string, array{string, list<string>}>
+     * What the parser reads a token id for, rather than the id itself.
+     *
+     * An id can change between versions without reaching the parser — `__PROPERTY__` is a name
+     * on 8.3 and `T_PROPERTY_C` on 8.4 — so pinning ids would go red for a reason that changes
+     * nothing. These eight classes are every distinction `splitSignature()` draws.
+     *
+     * @param array{0: int, 1: string, 2: int}|string $token
+     */
+    private static function tokenClass(array|string $token): string
+    {
+        if (!is_array($token)) {
+            return 'char';
+        }
+
+        return match ($token[0]) {
+            T_WHITESPACE => 'whitespace',
+            T_COMMENT, T_DOC_COMMENT => 'comment',
+            T_CLOSE_TAG => 'close-tag',
+            T_VARIABLE => 'variable',
+            T_LNUMBER, T_DNUMBER => 'number',
+            T_CONSTANT_ENCAPSED_STRING => 'string',
+            default => 'word',
+        };
+    }
+
+    /**
+     * @return array<string, array{string, list<string>, list<string>}>
      */
     public static function tokenStreamProvider(): array
     {
@@ -748,18 +827,30 @@ final class MethodNameServiceTest extends TestCase
         self::assertIsArray($lines);
 
         $cases = [];
+        $data = 0;
         foreach ($lines as $line) {
-            if (str_starts_with($line, '#')) {
+            // Only a full comment line is skipped. A signature may start with `#[`, and a
+            // looser test would drop it from the corpus without saying so.
+            if (str_starts_with($line, '# ') || $line === '#') {
                 continue;
             }
 
-            [$signature, $json] = explode("\t", $line, 2);
-            $tokens = json_decode($json, true);
+            $data++;
+            $columns = explode("\t", $line);
+            self::assertCount(3, $columns, 'Every fixture line carries a signature and two JSON columns');
+
+            $tokens = json_decode($columns[1], true);
+            $classes = json_decode($columns[2], true);
             self::assertIsArray($tokens);
+            self::assertIsArray($classes);
 
             /** @var list<string> $tokens */
-            $cases[$signature] = [$signature, $tokens];
+            /** @var list<string> $classes */
+            $cases[$columns[0]] = [$columns[0], $tokens, $classes];
         }
+
+        // Keying by signature would swallow a duplicated line, and with it the case it covers.
+        self::assertCount($data, $cases, 'The fixture holds no duplicate signature');
 
         return $cases;
     }
