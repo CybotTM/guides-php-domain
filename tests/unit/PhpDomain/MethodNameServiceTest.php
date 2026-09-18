@@ -32,6 +32,7 @@ use function preg_match;
 use function preg_replace;
 use function get_defined_constants;
 use function sort;
+use function str_contains;
 use function sprintf;
 use function token_get_all;
 use function trim;
@@ -826,8 +827,12 @@ final class MethodNameServiceTest extends TestCase
         $lines = file(__DIR__ . '/Fixtures/token-streams.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         self::assertIsArray($lines);
 
+        // Counted from the file rather than from the loop below, so that skipping a line for
+        // the wrong reason — a signature starting with `#[` read as a comment, or a duplicate
+        // swallowed by the keying — shrinks the corpus into a failure instead of into silence.
+        $expected = count(array_filter($lines, static fn(string $line): bool => str_contains($line, "\t")));
+
         $cases = [];
-        $data = 0;
         foreach ($lines as $line) {
             // Only a full comment line is skipped. A signature may start with `#[`, and a
             // looser test would drop it from the corpus without saying so.
@@ -835,7 +840,6 @@ final class MethodNameServiceTest extends TestCase
                 continue;
             }
 
-            $data++;
             $columns = explode("\t", $line);
             self::assertCount(3, $columns, 'Every fixture line carries a signature and two JSON columns');
 
@@ -849,8 +853,7 @@ final class MethodNameServiceTest extends TestCase
             $cases[$columns[0]] = [$columns[0], $tokens, $classes];
         }
 
-        // Keying by signature would swallow a duplicated line, and with it the case it covers.
-        self::assertCount($data, $cases, 'The fixture holds no duplicate signature');
+        self::assertCount($expected, $cases, 'Every fixture line yields exactly one case');
 
         return $cases;
     }
