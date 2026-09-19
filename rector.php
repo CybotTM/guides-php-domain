@@ -13,9 +13,9 @@ use Rector\Set\ValueObject\LevelSetList;
 use Rector\Set\ValueObject\SetList;
 
 return static function (RectorConfig $config): void {
-    $config->phpVersion(PhpVersion::PHP_81);
+    $config->phpVersion(PhpVersion::PHP_82);
 
-    $config->import(LevelSetList::UP_TO_PHP_81);
+    $config->import(LevelSetList::UP_TO_PHP_82);
     $config->import(SetList::CODE_QUALITY);
     $config->import(SetList::DEAD_CODE);
     $config->import(SetList::EARLY_RETURN);
