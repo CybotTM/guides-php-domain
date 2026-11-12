@@ -1,0 +1,5 @@
+extractTransUnit(\\XMLReader $reader)
+getReport(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
+getStatus(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
+setTime($hour, $minute[, $second])
+setUrl(string url)

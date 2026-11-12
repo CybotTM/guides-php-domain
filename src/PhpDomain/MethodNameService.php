@@ -6,6 +6,8 @@ namespace T3Docs\GuidesPhpDomain\PhpDomain;
 
 use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
 use PhpParser\Error as PhpParserError;
+use PhpParser\ErrorHandler\Collecting;
+use PhpParser\Lexer\Emulative;
 use PhpParser\Node\Stmt\Function_;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
@@ -22,12 +24,17 @@ use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 use Throwable;
 
 use function count;
+use function in_array;
 use function preg_match;
 use function strpos;
 use function sprintf;
+use function str_ends_with;
 use function strlen;
 use function substr;
 use function trim;
+
+use const T_COMMENT;
+use const T_DOC_COMMENT;
 
 /**
  * Splits the text of a `php:method::` directive into its method name, parameters and return type.
@@ -53,6 +60,8 @@ class MethodNameService
 {
     private readonly Parser $phpParser;
 
+    private readonly Emulative $phpLexer;
+
     private readonly Lexer $docLexer;
 
     private readonly PhpDocParser $docParser;
@@ -63,6 +72,7 @@ class MethodNameService
         // The newest grammar this library knows, not the one running the render. A manual
         // documenting PHP 8.4 syntax has to parse on a renderer still on 8.2.
         $this->phpParser = (new ParserFactory())->createForVersion(PhpVersion::getNewestSupported());
+        $this->phpLexer = new Emulative(PhpVersion::getNewestSupported());
 
         $config = new ParserConfig([]);
         $this->docLexer = new Lexer($config);
@@ -72,7 +82,9 @@ class MethodNameService
 
     public function getMethodName(BlockContext $blockContext, string $name): MethodNameNode
     {
-        $signature = $this->splitWithPhpParser($name) ?? $this->splitWithPhpDocParser($name);
+        $signature = $this->hasComment($name)
+            ? null
+            : $this->splitWithPhpParser($name) ?? $this->splitWithPhpDocParser($name);
 
         if ($signature !== null) {
             return new MethodNameNode($signature['name'], $signature['params'], $signature['return']);
@@ -80,6 +92,24 @@ class MethodNameService
 
         $this->logger->warning(sprintf('Method signature %s in PHP-domain method description is invalid. ', $name), $blockContext->getLoggerInformation());
         return new MethodNameNode($name, [], null);
+    }
+
+    /**
+     * Whether the signature holds a comment.
+     *
+     * Both parsers skip a comment. So a block comment around the second parameter renders a
+     * method with one parameter, and the author does not learn that the second one is gone. A
+     * comment is no part of a signature, so the signature gets a warning instead.
+     */
+    private function hasComment(string $signature): bool
+    {
+        foreach ($this->phpLexer->tokenize('<?php function ' . $signature, new Collecting()) as $token) {
+            if (in_array($token->id, [T_COMMENT, T_DOC_COMMENT], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -240,6 +270,12 @@ class MethodNameService
             return null;
         }
 
+        // phpdoc-parser reads a type name that ends in `-` as a name. Such a name is a cut
+        // `non-empty-list` or `non-empty-string`, so it gets a warning.
+        if ($return !== null && str_ends_with($return, '-')) {
+            return null;
+        }
+
         return ['name' => $name, 'params' => $params, 'return' => $return];
     }
 
@@ -263,7 +299,6 @@ class MethodNameService
     private function closingParenthesis(string $signature): int|null
     {
         $depth = 0;
-        $opened = false;
         $quote = null;
         $length = strlen($signature);
 
@@ -287,7 +322,6 @@ class MethodNameService
 
             if ($character === '(') {
                 $depth++;
-                $opened = true;
                 continue;
             }
 
@@ -304,7 +338,7 @@ class MethodNameService
             }
         }
 
-        return $opened ? null : null;
+        return null;
     }
 
     /**

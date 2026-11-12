@@ -48,7 +48,6 @@ encrypt(string $plaintext, string $identifier): EncryptedData
 encrypt(string $plaintext, string $identifier): array
 exists(string $identifier): bool
 extractFromAttributeValueOrStyle(array $attributes, string $imageAttribute)
-extractTransUnit(\\XMLReader $reader)
 fifthMethod($one, $two)
 findMostSimilar(array $queryVector, array $candidates, int $topK = 5): array
 firstMethod($one, $two)
@@ -92,12 +91,10 @@ getOptions()
 getProvider(): string
 getProvider(?string $identifier = null): ProviderInterface
 getReport()
-getReport(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
 getRequireJsModules()
 getServiceName()
 getSomething()
 getStatus()
-getStatus(Psr\\Http\\Message\\ServerRequestInterface request = NULL)
 getSupportedImageFormats(): array
 getTables(): array
 getTarget()
@@ -175,8 +172,6 @@ setDate(int $year, int $month, int $day)
 setEnabled(string $identifier, bool $enabled, string $reason = ''): void
 setExceptionalErrors($exceptionalErrors)
 setRequest(ServerRequestInterface $request)
-setTime($hour, $minute[, $second])
-setUrl(string url)
 store(string $identifier, string $secret, array $options = []): void
 streamChat(array $messages, ?ChatOptions $options = null): Generator
 streamChatCompletion(array $messages, array $options = []): Generator

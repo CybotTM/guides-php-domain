@@ -152,43 +152,6 @@ final class MethodNameServiceTest extends TestCase
                 ['public private(set) string $id'],
                 null,
             ],
-
-            // PHP 8.4 lexes `private(set)` as one token and every version before it as four.
-            // It is not a return type under either reading, but it has to be the same answer on
-            // both, or a manual renders differently depending on the PHP its renderer runs.
-            'asymmetric visibility in the return type' => [
-                'get(): private(set)',
-                'get',
-                [],
-                'private(set)',
-            ],
-            'asymmetric visibility inside a shape' => [
-                'get(): array{a: protected(set)}',
-                'get',
-                [],
-                'array{a: protected(set)}',
-            ],
-
-            // PHP 8.5 lexes `|>` as one token where earlier versions lex two. Only the `>` in
-            // it closes a bracket, so a generic ends where it ends on every version.
-            'pipe and angle bracket lexed as one token' => [
-                'get(): array<int|>',
-                'get',
-                [],
-                'array<int|>',
-            ],
-            'pipe with a comparison operator after it' => [
-                'get(int |>= $a)',
-                'get',
-                ['int |>= $a'],
-                null,
-            ],
-            'pipe with a shift-assign operator after it' => [
-                'get(int |>>= $a)',
-                'get',
-                ['int |>>= $a'],
-                null,
-            ],
             'attribute on a parameter' => [
                 'setPassword(#[\\SensitiveParameter] string $password): void',
                 'setPassword',
@@ -371,12 +334,6 @@ final class MethodNameServiceTest extends TestCase
                 ['array{a: array{b: list<int>}} $x'],
                 null,
             ],
-            'generic inside a callable parameter type' => [
-                'store(callable(array<int, string>): void $fn)',
-                'store',
-                ['callable(array<int, string>): void $fn'],
-                null,
-            ],
 
             // A class constant is a type of its own, not only a shape key, and `Foo::*` names
             // every constant of a class.
@@ -481,12 +438,6 @@ final class MethodNameServiceTest extends TestCase
             ],
 
             // Parameter syntax the parser accepts and nothing pinned.
-            'assignment inside an attribute before a generic' => [
-                'store(#[Attr(x = 1)] array<int, string> $a)',
-                'store',
-                ['#[Attr(x = 1)] array<int, string> $a'],
-                null,
-            ],
             'generic after a parameter with a default' => [
                 'store(int $a = 1, array<int, string> $b)',
                 'store',
@@ -639,14 +590,29 @@ final class MethodNameServiceTest extends TestCase
             'doc comment inside the parameter list' => ['broken(int $a /** d */)'],
             'closing tag with nothing after it' => ['broken(int $a ?>)'],
             'closing tag ending the signature' => ['broken(int $a ?>'],
+
+            // Text that is neither PHP nor a PHPStan type. PHP 8.4 lexes `private(set)` as one
+            // token and 8.5 lexes `|>` as one; php-parser reads both the same on every version.
+            'asymmetric visibility in the return type' => ['get(): private(set)'],
+            'asymmetric visibility inside a shape' => ['get(): array{a: protected(set)}'],
+            'pipe inside a generic return type' => ['get(): array<int|>'],
+            'pipe with a comparison operator after it' => ['get(int |>= $a)'],
+            'pipe with a shift-assign operator after it' => ['get(int |>>= $a)'],
+
+            // A PHPStan type combined with syntax that only one of the two libraries reads:
+            // php-parser has no generics, and phpdoc-parser has no attributes and reads no
+            // generic inside a callable parameter.
+            'generic inside a callable parameter type' => ['store(callable(array<int, string>): void $fn)'],
+            'attribute before a generic parameter type' => ['store(#[Attr(x = 1)] array<int, string> $a)'],
         ];
     }
 
     /**
-     * Every method signature found in the TYPO3 documentation at the time of writing.
+     * Every valid method signature found in the TYPO3 documentation at the time of writing.
      *
      * The parser may become stricter or more lenient over time, but it must not start
-     * rejecting a signature that is in use today.
+     * rejecting a valid signature that is in use today. The 5 invalid ones are in
+     * `real-world-invalid-signatures.txt`.
      */
     #[DataProvider('realWorldSignatureProvider')]
     public function testRealWorldSignatureIsAccepted(string $signature): void
@@ -698,6 +664,39 @@ final class MethodNameServiceTest extends TestCase
         foreach ($lines as $line) {
             $cases[$line] = [$line];
         }
+
+        return $cases;
+    }
+
+    /**
+     * Signatures from the TYPO3 documentation that are not valid PHP.
+     *
+     * Each one warns, so that somebody corrects the documentation. A missing `$`, doubled
+     * backslashes and the bracket notation php.net uses for an optional parameter are in it.
+     */
+    #[DataProvider('invalidRealWorldSignatureProvider')]
+    public function testInvalidRealWorldSignatureWarns(string $signature): void
+    {
+        $node = $this->service->getMethodName($this->blockContext(), $signature);
+
+        self::assertSame($signature, $node->getName(), 'The unparsable text is kept as the name');
+        self::assertCount(1, $this->warnings(), sprintf('"%s" warns exactly once', $signature));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function invalidRealWorldSignatureProvider(): array
+    {
+        $lines = file(__DIR__ . '/Fixtures/real-world-invalid-signatures.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($lines);
+
+        $cases = [];
+        foreach ($lines as $line) {
+            $cases[$line] = [$line];
+        }
+
+        self::assertCount(5, $cases, 'Every fixture line yields exactly one case');
 
         return $cases;
     }
