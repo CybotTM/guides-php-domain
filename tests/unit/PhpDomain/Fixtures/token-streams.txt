@@ -1,7 +1,7 @@
-# The token stream each signature lexes into, after MethodNameService has undone the tokens a
-# newer PHP merges. Recorded on PHP 8.1, where none of them are merged, and asserted on every
-# version in the CI matrix: a token a later PHP merges fails this test rather than quietly
-# changing what a manual renders.
+# The token stream each signature lexes into, as MethodNameService::tokenize() returns it.
+# Recorded on PHP 8.1, which merges none of the tokens later versions merge, and asserted on
+# every version in the CI matrix: a token a later PHP merges fails this test rather than
+# quietly changing what a manual renders.
 #
 # Three columns, tab separated: the signature, the token texts as JSON, and the class of each
 # token as JSON. The class is what the parser reads a token id for — whitespace, comment,
@@ -9,8 +9,8 @@
 # for reasons that do not reach the parser (`__PROPERTY__` is a name on 8.3 and T_PROPERTY_C
 # on 8.4, and both read the same here).
 #
-# Regenerate by lexing '<?php function ' . $signature, dropping the first two tokens and
-# passing the rest through MethodNameService::normaliseMergedTokens().
+# Regenerate on PHP 8.1 by lexing '<?php function ' . $signature with token_get_all() and
+# dropping the first two tokens.
 n(int |> $a)	[" ","n","(","int"," ","|",">"," ","$a",")"]	["whitespace","word","char","word","whitespace","char","char","whitespace","variable","char"]
 n(): array<int|>	[" ","n","(",")",":"," ","array","<","int","|",">"]	["whitespace","word","char","char","char","whitespace","word","char","word","char","char"]
 n(array<int|> $a)	[" ","n","(","array","<","int","|",">"," ","$a",")"]	["whitespace","word","char","word","char","word","char","char","whitespace","variable","char"]

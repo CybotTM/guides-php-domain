@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace T3Docs\GuidesPhpDomain\PhpDomain;
 
 use phpDocumentor\Guides\RestructuredText\Parser\BlockContext;
+use PhpParser\ErrorHandler\Collecting;
+use PhpParser\Lexer\Emulative;
+use PhpParser\PhpVersion;
 use Psr\Log\LoggerInterface;
 use T3Docs\GuidesPhpDomain\Nodes\MethodNameNode;
 
 use function array_pop;
 use function array_slice;
-use function constant;
 use function count;
-use function defined;
 use function in_array;
 use function is_array;
 use function preg_match;
@@ -20,7 +21,6 @@ use function sprintf;
 use function str_ends_with;
 use function strlen;
 use function strtolower;
-use function token_get_all;
 use function trim;
 
 use const T_CLOSE_TAG;
@@ -34,9 +34,13 @@ use const T_WHITESPACE;
 
 class MethodNameService
 {
+    private readonly Emulative $lexer;
+
     public function __construct(
         private readonly LoggerInterface $logger
-    ) {}
+    ) {
+        $this->lexer = new Emulative(PhpVersion::fromComponents(8, 1));
+    }
 
     public function getMethodName(BlockContext $blockContext, string $name): MethodNameNode
     {
@@ -65,109 +69,71 @@ class MethodNameService
     }
 
     /**
-     * Rewrites the tokens PHP 8.5 merges into the several every earlier version produces.
+     * Lexes the signature into the token texts PHP 8.1 produces, on every PHP version that
+     * renders a manual.
      *
-     * 8.5 lexes `|>` as one token and `(void)` as a cast, and 8.4 lexes `private(set)` as one
-     * where 8.3 lexes four. The rest of this class then never sees a token that depends on the
-     * PHP rendering the documentation — the same boundary the lexer-only design avoids for
-     * syntax, applied to the lexer's own output. `MethodNameServiceTest` compares the stream
-     * this produces against a recorded one, so a token a later PHP merges fails a test rather
-     * than quietly changing what a manual renders.
+     * Later versions merge text into one token that 8.1 lexes apart: 8.4 `private(set)`, 8.5
+     * `|>` and `(void)`. Each merge made a signature render on one version and warn on another.
+     * The emulative lexer of nikic/php-parser undoes them, and its maintainers add each new
+     * merge with the PHP release that introduces it. Some token ids still differ from 8.1, for
+     * example `readonly` and `&`, but the splitter does not read those ids. `MethodNameServiceTest`
+     * compares the result for the signatures in `token-streams.txt` against streams recorded
+     * on 8.1, so a merge the lexer misses in one of those signatures fails a test.
      *
-     * The `|>` case re-lexes rather than listing what may follow, because 8.4 munches maximally
-     * from that `>`: `|>=` was `>=`, `|>>=` was `>>=`, `|>==` was `>=` and `=`. Re-lexing the
-     * `>` together with the one token after it reproduces that without enumerating it.
+     * Lexer errors are collected and not read. The splitter decides on the tokens alone: an
+     * unterminated comment or string is rejected, and the caller turns that into a warning.
      *
-     * Only tokens whose merging depends on the version are undone. `(int)` is a cast on every
-     * version and is left as the one token it always was.
-     *
-     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
-     *
-     * @return list<array{0: int, 1: string, 2: int}|string>
+     * @return list<array{0: int, 1: string, 2: int}|string> the tokens after `function`,
+     *         a single-character token as its text
      */
-    private function normaliseMergedTokens(array $tokens): array
+    private function tokenize(string $signature): array
     {
-        // The ids naming these tokens do not exist before 8.5, so they are looked up by name.
-        // Matching on the id rather than on the text keeps a `|>` inside a string or in the
-        // inline HTML after a closing tag out of it.
-        $pipe = defined('T_PIPE') ? constant('T_PIPE') : null;
-        $merged = [];
+        $tokens = $this->lexer->tokenize('<?php function ' . $signature, new Collecting());
 
-        foreach (['T_VOID_CAST', 'T_PRIVATE_SET', 'T_PROTECTED_SET', 'T_PUBLIC_SET'] as $name) {
-            if (defined($name)) {
-                $merged[] = constant($name);
-            }
-        }
+        // The lexer ends the list with a sentinel token that is not part of the text.
+        array_pop($tokens);
 
         $result = [];
+
+        // The opening tag and the `function` keyword this method prepended itself. Skipping
+        // them by position rather than by text keeps `function()` — a legal method name that
+        // lexes as a keyword — parsable, and keeps an author's own `function` a warning.
+        $tokens = array_slice($tokens, 2);
         $total = count($tokens);
 
         for ($index = 0; $index < $total; $index++) {
             $token = $tokens[$index];
+            $result[] = $token->id < 256 ? $token->text : [$token->id, $token->text, $token->line];
 
-            if (!is_array($token)) {
-                $result[] = $token;
+            // On PHP 8.5 the lexer splits `|>` into `|` and `>`, but it does not lex the `>`
+            // again together with the tokens after it, as 8.1 does: `|>=` is `|` and `>=` on
+            // 8.1. Only `=` and `>` extend an operator that starts with `>`, so the run of
+            // tokens made of those two characters is lexed again. Below 8.5 the run is empty,
+            // because 8.1 never lexes a `>` after a `|` with a `=` or `>` directly behind it.
+            if ($token->text !== '>' || ($tokens[$index - 1]->text ?? '') !== '|') {
                 continue;
             }
 
-            if (in_array($token[0], $merged, true) && preg_match('/^([A-Za-z_]*)\\((\\s*)([A-Za-z]+)(\\s*)\\)$/', $token[1], $parts) === 1) {
-                // The word is lexed on its own, so it carries the id PHP gives it — `private`
-                // is `T_PRIVATE`, `void` a plain name — rather than a guessed one. Lexing the
-                // whole text again would only merge it back into the token being taken apart.
-                $word = @token_get_all('<?php ' . $parts[3])[1];
+            $run = '>';
+            $ahead = $index + 1;
 
-                if ($parts[1] !== '') {
-                    $result[] = @token_get_all('<?php ' . $parts[1])[1];
-                }
+            while ($ahead < $total && preg_match('/^[=>]+$/D', $tokens[$ahead]->text) === 1) {
+                $run .= $tokens[$ahead]->text;
+                $ahead++;
+            }
 
-                $result[] = '(';
-
-                if ($parts[2] !== '') {
-                    $result[] = [T_WHITESPACE, $parts[2], $token[2]];
-                }
-
-                $result[] = $word;
-
-                if ($parts[4] !== '') {
-                    $result[] = [T_WHITESPACE, $parts[4], $token[2]];
-                }
-
-                $result[] = ')';
+            if ($ahead === $index + 1) {
                 continue;
             }
 
-            if ($pipe !== null && $token[0] === $pipe) {
-                // 8.4 lexed `|` and then munched maximally from the `>`. Only `=` and `>` can
-                // extend an operator that starts with one, so the munch reaches exactly as far
-                // as the run of tokens made of those two characters — never into a string, a
-                // name or whitespace. Re-lexing that run reproduces the older reading without
-                // restarting the lexer over the rest, which would read a string's closing
-                // quote as an opening one.
-                $run = '>';
-                $ahead = $index + 1;
+            array_pop($result);
+            $relexed = $this->lexer->tokenize('<?php ' . $run, new Collecting());
 
-                while ($ahead < $total) {
-                    $text = is_array($tokens[$ahead]) ? $tokens[$ahead][1] : $tokens[$ahead];
-
-                    if (preg_match('/^[=>]+$/D', $text) !== 1) {
-                        break;
-                    }
-
-                    $run .= $text;
-                    $ahead++;
-                }
-
-                $result[] = '|';
-
-                foreach (array_slice(@token_get_all('<?php ' . $run), 1) as $part) {
-                    $result[] = $part;
-                }
-
-                $index = $ahead - 1;
-                continue;
+            foreach (array_slice($relexed, 1, -1) as $part) {
+                $result[] = $part->id < 256 ? $part->text : [$part->id, $part->text, $token->line];
             }
 
-            $result[] = $token;
+            $index = $ahead - 1;
         }
 
         return $result;
@@ -177,8 +143,8 @@ class MethodNameService
      * Pops the generic brackets an angle-bracket token closes.
      *
      * `>>` ends two generics but lexes as one token, so `array<int, list<string>>` closes both
-     * of its brackets at once. Only `>` and `>>` reach this — `normaliseMergedTokens()` has
-     * already taken PHP 8.5's `|>` apart — so the text is as many brackets as characters.
+     * of its brackets at once. Only `>` and `>>` reach this — `tokenize()` has already taken
+     * PHP 8.5's `|>` apart — so the text is as many brackets as characters.
      * Returns false when the brackets do not match, which leaves the caller to reject the
      * signature rather than repair it.
      *
@@ -267,16 +233,15 @@ class MethodNameService
     /**
      * Splits a signature into its method name, its parameters and its return type.
      *
-     * PHP's own lexer does the splitting, which is what makes a comma inside a default value
+     * A PHP lexer does the splitting, which is what makes a comma inside a default value
      * (`array $range = [1, 2]`, `string $glue = ", "`) a part of that parameter rather than a
      * separator, and what keeps every type syntax working — `?string`, `string|array`,
      * `A&B`, `\Vendor\Thing`, variadics, by-reference and promoted properties alike.
      *
-     * The lexer is used without `TOKEN_PARSE` on purpose. That flag would run the grammar of
-     * the PHP version rendering the documentation, so a manual documenting PHP 8.4 syntax
-     * would fail to render on a PHP 8.2 renderer — and it would fail with a `CompileError`,
-     * which is not a `ParseError` and would abort the whole run. Lexing carries no such
-     * version boundary: the structure below is derived from parentheses and commas only.
+     * No PHP grammar runs on the tokens, on purpose. A grammar rejects the PHPStan and Psalm
+     * types that manuals write — `array{name: string}`, `list<int>`, `0|1` — and it rejects
+     * syntax newer than the grammar. The structure below is derived from brackets and commas
+     * only, so a signature renders the same on every PHP version.
      *
      * Nothing but the signature is lexed — no body is appended — so a return type carries its
      * own brackets, which PHPStan and Psalm array shapes and generics are written with. Two
@@ -297,13 +262,7 @@ class MethodNameService
      */
     private function splitSignature(string $signature): array|null
     {
-        /** @var list<array{0: int, 1: string, 2: int}|string> $tokens */
-        $tokens = @token_get_all('<?php function ' . $signature);
-
-        // The opening tag and the `function` keyword this method prepended itself. Skipping
-        // them by position rather than by text keeps `function()` — a legal method name that
-        // lexes as a keyword — parsable, and keeps an author's own `function` a warning.
-        $tokens = $this->normaliseMergedTokens(array_slice($tokens, 2));
+        $tokens = $this->tokenize($signature);
 
         /** @var array<string, string> $openers a bracket and the closer that has to match it */
         $openers = ['(' => ')', '[' => ']', '{' => '}', '#[' => ']', '<' => '>'];

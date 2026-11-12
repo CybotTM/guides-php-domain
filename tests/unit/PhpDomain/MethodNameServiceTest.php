@@ -17,11 +17,7 @@ use Psr\Log\LoggerInterface;
 use Stringable;
 use T3Docs\GuidesPhpDomain\PhpDomain\MethodNameService;
 
-use function array_diff;
 use function array_filter;
-use function array_keys;
-use function array_slice;
-use function array_values;
 use function explode;
 use function file;
 use function implode;
@@ -30,11 +26,8 @@ use function json_decode;
 use function str_starts_with;
 use function preg_match;
 use function preg_replace;
-use function get_defined_constants;
-use function sort;
 use function str_contains;
 use function sprintf;
-use function token_get_all;
 use function trim;
 
 use const FILE_IGNORE_NEW_LINES;
@@ -730,17 +723,18 @@ final class MethodNameServiceTest extends TestCase
      *
      * PHP merges tokens between versions — 8.4 `private(set)`, 8.5 `|>` and `(void)` — and each
      * time it did, a signature started rendering on one version and warning on another.
-     * `normaliseMergedTokens()` undoes them; this pins the result against a stream recorded on
-     * 8.1, where none of them are merged, so the next merge fails here instead.
+     * `tokenize()` produces the token texts of PHP 8.1; this pins the result against streams
+     * recorded on 8.1, where none of them are merged. A merge the lexer misses fails here when
+     * a signature in `token-streams.txt` contains it, so add a line for each new merge.
      *
      * @param list<string> $expectedTokens
      * @param list<string> $expectedClasses
      */
     #[DataProvider('tokenStreamProvider')]
-    public function testMergedTokensAreUndone(string $signature, array $expectedTokens, array $expectedClasses): void
+    public function testTokensMatchPhp81(string $signature, array $expectedTokens, array $expectedClasses): void
     {
-        $method = new ReflectionMethod($this->service, 'normaliseMergedTokens');
-        $tokens = $method->invoke($this->service, array_slice(@token_get_all('<?php function ' . $signature), 2));
+        $method = new ReflectionMethod($this->service, 'tokenize');
+        $tokens = $method->invoke($this->service, $signature);
         self::assertIsArray($tokens);
 
         $texts = [];
@@ -753,44 +747,6 @@ final class MethodNameServiceTest extends TestCase
         $where = sprintf('"%s" lexes differently on PHP %s than it did on 8.1', $signature, PHP_VERSION);
         self::assertSame($expectedTokens, $texts, $where);
         self::assertSame($expectedClasses, $classes, $where);
-    }
-
-    /**
-     * A token kind this parser has never seen must not reach it unexamined.
-     *
-     * Every defect this class has had across PHP versions came from the same place: a version
-     * added a token kind that merged text earlier versions lexed apart, and a signature started
-     * rendering on one version and warning on another. Three were found one at a time. This
-     * pins the set itself, so the next one fails here — on the CI matrix, the first time a new
-     * version is added to it — rather than in somebody's manual.
-     *
-     * A name appearing here is not a defect. It means someone has to check whether the token
-     * merges text, and if it does, add it to `normaliseMergedTokens()` and to
-     * `token-streams.txt`; if it does not, add it to this list with a note.
-     */
-    public function testNoUnexaminedTokenKindExists(): void
-    {
-        $constants = get_defined_constants(true);
-        self::assertArrayHasKey('tokenizer', $constants);
-
-        $known = file(__DIR__ . '/Fixtures/token-kinds.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        self::assertIsArray($known);
-
-        $known = array_values(array_filter($known, static fn(string $line): bool => !str_starts_with($line, '#')));
-        $found = array_keys($constants['tokenizer']);
-        sort($found);
-        sort($known);
-
-        self::assertSame(
-            [],
-            array_values(array_diff($found, $known)),
-            sprintf(
-                'PHP %s defines a token kind this parser has not been checked against. '
-                . 'If it merges text an earlier version lexes apart, handle it in '
-                . 'normaliseMergedTokens(); otherwise add it to Fixtures/token-kinds.txt.',
-                PHP_VERSION,
-            ),
-        );
     }
 
     /**

@@ -13,11 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 8.4 and 8.5 are load-bearing for more than coverage: `MethodNameService` reads a
-        # signature with `token_get_all()`, whose tokenisation changes between versions — 8.4
-        # merges `private(set)` into one token, 8.5 merges `|>` and `(void)`. Those readings
-        # are guarded so a manual renders the same whichever PHP renders it, and such a guard
-        # can only fail on a version that produces the merged token.
+        # Keep 8.4 and 8.5 in the matrix. PHP 8.4 merges `private(set)` into one token, and
+        # 8.5 merges `|>` and `(void)`. `MethodNameService` lexes a signature into 8.1 tokens,
+        # and a test compares the tokens with a stream recorded on 8.1. That test can only
+        # fail on a version that merges the token.
         php:
           - '8.2'
           - '8.3'
