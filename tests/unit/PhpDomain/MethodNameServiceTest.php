@@ -591,6 +591,9 @@ final class MethodNameServiceTest extends TestCase
             'closing tag with nothing after it' => ['broken(int $a ?>)'],
             'closing tag ending the signature' => ['broken(int $a ?>'],
 
+            // The node has no place for the `&` of a method that returns by reference.
+            'method returning by reference' => ['&getRef(): array'],
+
             // Text that is neither PHP nor a PHPStan type. PHP 8.4 lexes `private(set)` as one
             // token and 8.5 lexes `|>` as one; php-parser reads both the same on every version.
             'asymmetric visibility in the return type' => ['get(): private(set)'],

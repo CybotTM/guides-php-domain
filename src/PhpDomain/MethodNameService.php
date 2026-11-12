@@ -141,6 +141,12 @@ class MethodNameService
             return null;
         }
 
+        // `&getRef()` returns by reference. The node has no place for the `&`, so rendering
+        // the name alone would drop it without a warning.
+        if ($function->byRef) {
+            return null;
+        }
+
         $params = [];
 
         foreach ($function->params as $param) {
